@@ -17,18 +17,18 @@ repos:
     exclude: .patch
 
 - repo: https://github.com/psf/black
-  rev: 23.1.0
+  rev: 23.3.0
   hooks:
   - id: black
 
 - repo: https://github.com/astral-sh/ruff-pre-commit
   # Ruff version.
-  rev: v0.0.270
+  rev: v0.0.276
   hooks:
     - id: ruff
 
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v0.961
+  rev: v1.4.1
   hooks:
   - id: mypy
     exclude: tests/data
