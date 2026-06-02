@@ -11,7 +11,12 @@ import zipfile
 import pytest
 
 from pip._internal.exceptions import InstallationError
-from pip._internal.utils.unpacking import is_within_directory, untar_file, unzip_file
+from pip._internal.utils.unpacking import (
+    is_within_directory,
+    unpack_file,
+    untar_file,
+    unzip_file,
+)
 
 
 class TestUnpackArchives(object):
@@ -223,3 +228,58 @@ class TestUnpackArchives(object):
 def test_is_within_directory(args, expected):
     result = is_within_directory(*args)
     assert result == expected
+
+
+def _make_tar_zip_polyglot(path):
+    """Write a valid .tar.gz with a valid ZIP appended (a polyglot file).
+
+    The tar view and the zip view each contain a ``payload.txt`` with
+    different contents so a test can tell which format pip chose.
+    """
+    # Use a top-level directory (as real sdists/wheels do) so pip's
+    # leading-directory flattening behaves the same for both views.
+    tar_buf = io.BytesIO()
+    tar = tarfile.open(fileobj=tar_buf, mode='w:gz')
+    data = b'from-tar'
+    info = tarfile.TarInfo('pkg/payload.txt')
+    info.size = len(data)
+    tar.addfile(info, io.BytesIO(data))
+    tar.close()
+
+    zip_buf = io.BytesIO()
+    zf = zipfile.ZipFile(zip_buf, 'w')
+    zf.writestr('pkg/payload.txt', 'from-zip')
+    zf.close()
+
+    with open(path, 'wb') as fp:
+        fp.write(tar_buf.getvalue() + zip_buf.getvalue())
+
+
+@pytest.mark.parametrize('filename, content_type, expected', [
+    # CVE-2026-3219: a .tar.gz polyglot must be treated as a tar (by its
+    # name), not silently as the appended zip.
+    ('pkg.tar.gz', None, b'from-tar'),
+    ('pkg.tgz', None, b'from-tar'),
+    ('pkg.zip', None, b'from-zip'),
+    # An explicit content-type wins over the filename.
+    ('pkg.tar.gz', 'application/zip', b'from-zip'),
+    ('pkg.bin', 'application/x-gzip', b'from-tar'),
+])
+def test_unpack_polyglot_routing(tmpdir, filename, content_type, expected):
+    archive = os.path.join(str(tmpdir), filename)
+    _make_tar_zip_polyglot(archive)
+    out = os.path.join(str(tmpdir), 'out')
+    unpack_file(archive, out, content_type=content_type)
+    with open(os.path.join(out, 'payload.txt'), 'rb') as fp:
+        assert fp.read() == expected
+
+
+def test_unpack_polyglot_ambiguous_rejected(tmpdir):
+    """
+    CVE-2026-3219: with no usable content-type or extension, a file that is
+    both a valid zip and a valid tar is ambiguous and must be rejected.
+    """
+    archive = os.path.join(str(tmpdir), 'pkg.unknownext')
+    _make_tar_zip_polyglot(archive)
+    with pytest.raises(InstallationError):
+        unpack_file(archive, os.path.join(str(tmpdir), 'out'))
