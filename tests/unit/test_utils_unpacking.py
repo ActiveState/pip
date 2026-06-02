@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import stat
@@ -166,6 +167,42 @@ class TestUnpackArchives(object):
         ]
         test_tar = self.make_tar_file('test_tar.tar', files)
         untar_file(test_tar, self.tempdir)
+
+    def test_unpack_tar_symlink_escape_failure(self):
+        """
+        CVE-2025-8869: a tar symlink whose target is not a member of the
+        archive (i.e. points to an arbitrary host path) must be rejected.
+        """
+        test_tar = os.path.join(self.tempdir, 'evil_symlink.tar')
+        with tarfile.open(test_tar, 'w') as tar:
+            info = tarfile.TarInfo('evil_link')
+            info.type = tarfile.SYMTYPE
+            info.linkname = os.path.join('..', '..', '..', 'etc', 'passwd')
+            tar.addfile(info)
+        with pytest.raises(InstallationError) as e:
+            untar_file(test_tar, os.path.join(self.tempdir, 'out'))
+        assert 'trying to point outside target directory' in str(e.value)
+
+    def test_unpack_tar_symlink_to_member_success(self):
+        """
+        A tar symlink pointing at another member of the same archive is safe
+        and is extracted unchanged.
+        """
+        test_tar = os.path.join(self.tempdir, 'good_symlink.tar')
+        content = b'data\n'
+        with tarfile.open(test_tar, 'w') as tar:
+            finfo = tarfile.TarInfo('target.txt')
+            finfo.size = len(content)
+            tar.addfile(finfo, io.BytesIO(content))
+            linfo = tarfile.TarInfo('link.txt')
+            linfo.type = tarfile.SYMTYPE
+            linfo.linkname = 'target.txt'
+            tar.addfile(linfo)
+        out = os.path.join(self.tempdir, 'out')
+        untar_file(test_tar, out)
+        link_path = os.path.join(out, 'link.txt')
+        assert os.path.islink(link_path)
+        assert os.readlink(link_path) == 'target.txt'
 
 
 @pytest.mark.parametrize('args, expected', [
