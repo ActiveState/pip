@@ -201,6 +201,30 @@ def test_git_is_commit_id_equal(mock_get_revision, rev_name, result):
     assert Git.is_commit_id_equal('/path', rev_name) is result
 
 
+@patch('pip._internal.vcs.git.Git.run_command')
+def test_git_get_revision_sha_unicode_separator(run_command_mock):
+    """
+    CVE-2021-3572: a git ref name containing a unicode line separator must
+    not be parsed into an extra, attacker-controlled ``show-ref`` line.
+    """
+    real_sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    malicious_sha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    # git emits a single physical line, but the tag name embeds U+2028 followed
+    # by a spoofed "<sha> refs/tags/1.0" payload. ``splitlines()`` would split
+    # on U+2028 and create a bogus refs/tags/1.0 -> malicious_sha mapping.
+    run_command_mock.return_value = (
+        u'{real} refs/tags/legit\u2028{bad} refs/tags/1.0\n'.format(
+            real=real_sha, bad=malicious_sha,
+        )
+    )
+    sha, is_branch = Git.get_revision_sha('/path', '1.0')
+    # With the fix the U+2028 stays inside the single ref name, so no
+    # refs/tags/1.0 mapping to the malicious sha is created.
+    assert sha != malicious_sha
+    assert sha is None
+    assert is_branch is False
+
+
 # The non-SVN backends all use the same get_netloc_and_auth(), so only test
 # Git as a representative.
 @pytest.mark.parametrize('args, expected', [
