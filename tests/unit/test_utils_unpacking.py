@@ -179,6 +179,9 @@ class TestUnpackArchives(object):
     (('parent/', 'parent/sub'), True),
     # Test target outside parent
     (('parent/', 'parent/../sub'), False),
+    # CVE-2026-1703: a sibling whose name has the directory as a string
+    # prefix must not be considered "within" it.
+    (('parent/child', 'parent/childfoo'), False),
 ])
 def test_is_within_directory(args, expected):
     result = is_within_directory(*args)
