@@ -9,6 +9,37 @@
 
 .. towncrier release notes start
 
+20.3.4+security.1 (2026-06-02)
+==============================
+
+Security Fixes
+--------------
+
+- **CVE-2021-3572**: Stop splitting ``git show-ref`` output on unicode
+  separators when resolving a git revision, preventing a crafted ref name from
+  spoofing the resolved revision. (`GHSA-5xp3-jfq3-5q8x <https://github.com/advisories/GHSA-5xp3-jfq3-5q8x>`_)
+- **CVE-2023-5752**: Pass a Mercurial revision as a single ``-r=<rev>`` token so
+  a malicious revision cannot inject ``hg`` command-line options (e.g.
+  ``--config``). (`GHSA-mq26-g339-26xf <https://github.com/advisories/GHSA-mq26-g339-26xf>`_)
+- **CVE-2025-8869**: Validate that tar symlink members point to other members
+  inside the same archive before extraction, closing a symlink-escape on the
+  no-``data_filter`` fallback path. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
+- **CVE-2026-3219**: Disambiguate archive type detection in ``unpack_file`` so a
+  tar+zip polyglot is no longer always treated as a zip; ambiguous archives are
+  rejected. (`GHSA-58qw-9mgm-455v <https://github.com/advisories/GHSA-58qw-9mgm-455v>`_)
+- **CVE-2026-1703**: Enforce a path-component boundary in ``is_within_directory``
+  (instead of a character-prefix comparison) so an extracted file cannot land in
+  a sibling directory whose name is a prefix of the install path. (`GHSA-6vgw-5pg2-w6jp <https://github.com/advisories/GHSA-6vgw-5pg2-w6jp>`_)
+
+.. note
+
+   CVE-2026-6357 / GHSA-jp4c-xjxw-mgf9 was assessed and found **not applicable**
+   to this release: pip 20.3.4 imports the self-version-check and all of its
+   dependencies eagerly at startup, and the post-install check touches only
+   vendored (``pip._vendor.*``) modules, so a newly-installed wheel has no
+   well-known module name to shadow.
+
+
 20.3.4 (2021-01-23)
 ===================
 
