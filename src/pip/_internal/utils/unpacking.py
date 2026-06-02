@@ -283,32 +283,61 @@ def unpack_file(
 ):
     # type: (...) -> None
     filename = os.path.realpath(filename)
-    if (
-        content_type == 'application/zip' or
-        filename.lower().endswith(ZIP_EXTENSIONS) or
-        zipfile.is_zipfile(filename)
-    ):
-        unzip_file(
-            filename,
-            location,
-            flatten=not filename.endswith('.whl')
-        )
-    elif (
-        content_type == 'application/x-gzip' or
-        tarfile.is_tarfile(filename) or
-        filename.lower().endswith(
-            TAR_EXTENSIONS + BZ2_EXTENSIONS + XZ_EXTENSIONS
-        )
-    ):
+
+    # CVE-2026-3219: choose the archive format by decreasing reliability
+    # (content-type, then filename extension, then magic signature) and only
+    # trust the magic signature when it is unambiguous. The previous logic ran
+    # ``zipfile.is_zipfile`` for any unrecognised name; since that scans for a
+    # ZIP end-of-central-directory record anywhere in the file, a tar+ZIP
+    # polyglot (e.g. a ZIP appended to a valid ``.tar.gz``) was always treated
+    # as a ZIP regardless of its name.
+    def _unzip():
+        # type: () -> None
+        unzip_file(filename, location, flatten=not filename.endswith('.whl'))
+
+    def _untar():
+        # type: () -> None
         untar_file(filename, location)
-    else:
-        # FIXME: handle?
-        # FIXME: magic signatures?
+
+    if content_type == 'application/zip':
+        return _unzip()
+    if content_type == 'application/x-gzip':
+        return _untar()
+
+    if filename.lower().endswith(ZIP_EXTENSIONS):
+        return _unzip()
+    if filename.lower().endswith(
+        TAR_EXTENSIONS + BZ2_EXTENSIONS + XZ_EXTENSIONS
+    ):
+        return _untar()
+
+    # Fall back to magic signatures, but refuse the ambiguous case where the
+    # file is simultaneously a valid ZIP and a valid tar.
+    is_zip = zipfile.is_zipfile(filename)
+    is_tar = tarfile.is_tarfile(filename)
+    if is_zip and not is_tar:
+        return _unzip()
+    if is_tar and not is_zip:
+        return _untar()
+    if is_zip and is_tar:
         logger.critical(
             'Cannot unpack file %s (downloaded from %s, content-type: %s); '
-            'cannot detect archive format',
+            'it is ambiguously both a zip and a tar archive',
             filename, location, content_type,
         )
         raise InstallationError(
-            'Cannot determine archive format of {}'.format(location)
+            'Ambiguous archive format (both zip and tar) of {}'.format(
+                location
+            )
         )
+
+    # FIXME: handle?
+    # FIXME: magic signatures?
+    logger.critical(
+        'Cannot unpack file %s (downloaded from %s, content-type: %s); '
+        'cannot detect archive format',
+        filename, location, content_type,
+    )
+    raise InstallationError(
+        'Cannot determine archive format of {}'.format(location)
+    )
