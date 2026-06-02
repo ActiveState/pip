@@ -38,7 +38,10 @@ class Mercurial(VersionControl):
 
     @staticmethod
     def get_base_rev_args(rev):
-        return [rev]
+        # CVE-2023-5752: pass the revision as a single ``-r=<rev>`` token so a
+        # malicious revision (e.g. ``--config=...``) cannot be interpreted by
+        # hg as a separate command-line option.
+        return ["-r={}".format(rev)]
 
     def export(self, location, url):
         # type: (str, HiddenText) -> None
