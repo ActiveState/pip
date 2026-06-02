@@ -102,6 +102,25 @@ def is_within_directory(directory, target):
     )
 
 
+def is_symlink_target_in_tar(tar, tarinfo):
+    # type: (tarfile.TarFile, tarfile.TarInfo) -> bool
+    """
+    Return true if the file the symlink member points to is itself a member
+    of the same tar archive, i.e. the symlink does not escape the archive to
+    reference an arbitrary path on the host filesystem (CVE-2025-8869).
+    """
+    linkname = os.path.join(os.path.dirname(tarinfo.name), tarinfo.linkname)
+
+    linkname = os.path.normpath(linkname)
+    linkname = linkname.replace("\\", "/")
+
+    try:
+        tar.getmember(linkname)
+        return True
+    except KeyError:
+        return False
+
+
 def set_extracted_file_to_default_mode_plus_executable(path):
     # type: (Union[str, Text]) -> None
     """
@@ -212,6 +231,14 @@ def untar_file(filename, location):
             if member.isdir():
                 ensure_dir(path)
             elif member.issym():
+                if not is_symlink_target_in_tar(tar, member):
+                    message = (
+                        'The tar file ({}) has a link ({}) trying to point '
+                        'outside target directory ({})'
+                    )
+                    raise InstallationError(
+                        message.format(filename, member.name, member.linkname)
+                    )
                 try:
                     # https://github.com/python/typeshed/issues/2673
                     tar._extract_member(member, path)  # type: ignore
