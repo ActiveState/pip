@@ -92,8 +92,14 @@ def is_within_directory(directory, target):
     abs_directory = os.path.abspath(directory)
     abs_target = os.path.abspath(target)
 
-    prefix = os.path.commonprefix([abs_directory, abs_target])
-    return prefix == abs_directory
+    # NOTE: os.path.commonprefix compares character-by-character, so it treats
+    #       "/a/parent" and "/a/parentfoo" as sharing the prefix "/a/parent"
+    #       and would report the latter as "within" the former (CVE-2026-1703).
+    #       os.path.commonpath compares on path components but is unavailable on
+    #       Python 2.7, so enforce a component boundary explicitly instead.
+    return abs_target == abs_directory or abs_target.startswith(
+        abs_directory + os.sep
+    )
 
 
 def set_extracted_file_to_default_mode_plus_executable(path):
