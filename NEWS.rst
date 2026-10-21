@@ -9,6 +9,45 @@
 
 .. towncrier release notes start
 
+26.0.1.post1 (2026-10-21)
+=========================
+
+Security Fixes
+--------------
+
+- **CVE-2026-3219**: Disambiguate archive type detection in ``unpack_file``
+  so a tar+zip polyglot is no longer always treated as a zip; ambiguous
+  archives are rejected. (`GHSA-58qw-9mgm-455v <https://github.com/advisories/GHSA-58qw-9mgm-455v>`_)
+- **CVE-2026-6357**: Run the network and import side of the pip
+  self-version check before the command body, so a just-installed wheel
+  cannot shadow a module the check imports afterwards; only the upgrade
+  prompt is printed after the command. (`GHSA-jp4c-xjxw-mgf9 <https://github.com/advisories/GHSA-jp4c-xjxw-mgf9>`_)
+- **CVE-2026-8643**: Reject ``console_scripts`` and ``gui_scripts`` entry
+  points whose name would install a script outside the scripts directory.
+  The vendored distlib 0.4.0 accepts such names unchanged, so this release
+  was directly affected. (`GHSA-wf93-45jw-7689 <https://github.com/advisories/GHSA-wf93-45jw-7689>`_)
+- **CVE-2026-13346**: Stop ``Link.filename`` percent-decoding the URL path a
+  second time, so a doubly-encoded separator from a malicious index (e.g.
+  ``..%252F..%252Fevil.whl``) can no longer write a download outside the
+  download directory. Download file names are now always validated as a
+  single path component. (`GHSA-qwm4-qh6w-59xr <https://github.com/advisories/GHSA-qwm4-qh6w-59xr>`_)
+- **GHSA-6q48-6c7w-9gw2**: Upgrade vendored certifi from 2026.1.4 to
+  2026.10.19 (the release vendored by pip 26.2.2), dropping the emSign ECC
+  Root CA - G3, whose intermediate CA keys were compromised. (`GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_)
+
+.. note
+
+   CVE-2026-1703 / GHSA-6vgw-5pg2-w6jp (``is_within_directory`` prefix
+   comparison) and CVE-2025-8869 / GHSA-4xh5-x5gv-qwph (tar symlink targets
+   on the extraction fallback) were already fixed upstream before pip
+   26.0.1.
+
+   This is an ActiveState security release for Python 3.9, the last Python
+   version pip 26.0.x supports (pip 26.1 requires Python 3.10). It uses the
+   PEP 440 post-release scheme: ``26.0.1.post1`` sorts after ``26.0.1`` and
+   before ``26.0.2``.
+
+
 26.0.1 (2026-02-04)
 ===================
 
