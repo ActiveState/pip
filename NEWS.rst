@@ -9,6 +9,42 @@
 
 .. towncrier release notes start
 
+20.3.4.post2 (2026-10-21)
+=========================
+
+Security Fixes
+--------------
+
+- **CVE-2026-13346**: Stop ``Link.filename`` percent-decoding the URL path a
+  second time, so a doubly-encoded separator from a malicious index (e.g.
+  ``..%252F..%252Fevil.whl``) can no longer write a download outside the
+  download directory. Download file names are now always validated as a
+  single path component. (`GHSA-qwm4-qh6w-59xr <https://github.com/advisories/GHSA-qwm4-qh6w-59xr>`_)
+- **CVE-2026-8643**: Reject ``console_scripts`` and ``gui_scripts`` entry
+  points whose name would install a script outside the scripts directory.
+  The vendored distlib 0.3.1 already limits entry point names to
+  ``[\w.+-]+``, so only ``.`` and ``..`` reached the scripts directory join on
+  this release; the check is backported as defense in depth. (`GHSA-wf93-45jw-7689 <https://github.com/advisories/GHSA-wf93-45jw-7689>`_)
+- **CVE-2022-23491** / **CVE-2023-37920**: Upgrade vendored certifi from
+  2020.11.08 to 2026.10.19.post1 (ActiveState's Python 2.7 build of certifi
+  2026.10.19, the release vendored by pip 26.2.2), dropping the distrusted
+  TrustCor and E-Tugra root certificates.
+  This also fixes ``certifi.contents()`` raising ``TypeError`` on Python 2.7.
+  (`GHSA-43fp-rhv2-5gv8 <https://github.com/advisories/GHSA-43fp-rhv2-5gv8>`_,
+  `GHSA-xqr8-7jwr-rhp7 <https://github.com/advisories/GHSA-xqr8-7jwr-rhp7>`_)
+
+.. note
+
+   CVE-2024-39689 / GHSA-248v-346w-9cwc (certifi GLOBALTRUST roots) was
+   assessed and found **not applicable**: those roots were added in certifi
+   2021.05.30 and were never part of the certifi 2020.11.08 bundle vendored
+   by 20.3.4.
+
+   This release uses the PEP 440 post-release scheme (``20.3.4.postN``)
+   instead of the earlier ``20.3.4+security.N`` local version.
+   ``20.3.4.post2`` sorts after ``20.3.4+security.1``.
+
+
 20.3.4+security.1 (2026-06-02)
 ==============================
 

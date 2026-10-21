@@ -23,6 +23,7 @@ from pip._internal.exceptions import (
     PreviousBuildDirError,
     VcsHashUnsupported,
 )
+from pip._internal.models.link import join_within_directory
 from pip._internal.models.wheel import Wheel
 from pip._internal.network.download import BatchDownloader, Downloader
 from pip._internal.network.lazy_wheel import (
@@ -270,7 +271,7 @@ def _check_download_dir(link, download_dir, hashes):
     """ Check download_dir for previously downloaded file with correct hash
         If a correct file is found return its path else None
     """
-    download_path = os.path.join(download_dir, link.filename)
+    download_path = join_within_directory(download_dir, link.filename)
 
     if not os.path.exists(download_path):
         return None
@@ -545,7 +546,9 @@ class RequirementPreparer(object):
             # No distribution was downloaded for this requirement.
             return
 
-        download_location = os.path.join(self.download_dir, link.filename)
+        download_location = join_within_directory(
+            self.download_dir, link.filename
+        )
         if not os.path.exists(download_location):
             shutil.copy(req.local_file_path, download_location)
             download_path = display_path(download_location)

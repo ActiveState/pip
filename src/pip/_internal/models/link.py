@@ -21,6 +21,53 @@ if MYPY_CHECK_RUNNING:
     from pip._internal.utils.hashes import Hashes
 
 
+def _to_path_component(name):
+    # type: (str) -> str
+    """Reduce ``name`` to a single path component, or ``""`` if it has none.
+
+    ``os.path.basename`` drops any directory part, drive letter, or separator;
+    a ``.``, ``..``, or empty result is not a component and becomes ``""``.
+    """
+    name = os.path.basename(name)
+    if name in ("", os.curdir, os.pardir):
+        return ""
+
+    return name
+
+
+def as_path_component(name):
+    # type: (str) -> str
+    """Like ``_to_path_component`` but reject the empty result.
+
+    Use where a file is about to be written, so a missing name is an error
+    rather than a silent fallback to the directory itself.
+    """
+    component = _to_path_component(name)
+    if not component:
+        raise ValueError(
+            "Unexpected file name derived from URL: {!r}".format(name)
+        )
+
+    return component
+
+
+def join_within_directory(directory, component):
+    # type: (str, str) -> str
+    """Join a single path ``component`` onto ``directory``.
+
+    ``component`` must come from :attr:`Link.filename` or
+    :func:`as_path_component`, so it has no separator and is not a ``.`` or
+    ``..`` reference; the result can never escape ``directory``. Python 2
+    has no runtime type to enforce that, so it is checked here instead.
+    """
+    if not component or component != _to_path_component(component):
+        raise ValueError(
+            "Not a single path component: {!r}".format(component)
+        )
+
+    return os.path.join(directory, component)
+
+
 class Link(KeyBasedCompareMixin):
     """Represents a parsed link from a Package Index's simple URL
     """
@@ -105,18 +152,15 @@ class Link(KeyBasedCompareMixin):
     @property
     def filename(self):
         # type: () -> str
-        path = self.path.rstrip('/')
-        name = posixpath.basename(path)
-        if not name:
-            # Make sure we don't leak auth information if the netloc
-            # includes a username and password.
-            netloc, user_pass = split_auth_from_netloc(self.netloc)
-            return netloc
+        # self.path is already percent-decoded; decoding it again would turn
+        # a doubly-encoded separator (%252F) into a real "/" (CVE-2026-13346).
+        name = _to_path_component(posixpath.basename(self.path.rstrip('/')))
+        if name:
+            return name
 
-        name = urllib_parse.unquote(name)
-        assert name, (
-            'URL {self._url!r} produced no filename'.format(**locals()))
-        return name
+        # No component in the path; fall back to the netloc, dropping any
+        # auth information so it is not leaked.
+        return _to_path_component(split_auth_from_netloc(self.netloc)[0])
 
     @property
     def file_path(self):
