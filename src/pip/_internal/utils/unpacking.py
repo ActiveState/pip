@@ -88,6 +88,20 @@ def is_within_directory(directory: str, target: str) -> bool:
     return prefix == abs_directory
 
 
+def is_symlink_target_in_tar(tar: tarfile.TarFile, tarinfo: tarfile.TarInfo) -> bool:
+    """Check if the file pointed to by the symbolic link is in the tar archive"""
+    linkname = os.path.join(os.path.dirname(tarinfo.name), tarinfo.linkname)
+
+    linkname = os.path.normpath(linkname)
+    linkname = linkname.replace("\\", "/")
+
+    try:
+        tar.getmember(linkname)
+        return True
+    except KeyError:
+        return False
+
+
 def set_extracted_file_to_default_mode_plus_executable(path: str) -> None:
     """
     Make file present at path have execute for user/group/world
@@ -190,6 +204,18 @@ def untar_file(filename: str, location: str) -> None:
             if member.isdir():
                 ensure_dir(path)
             elif member.issym():
+                # CVE-2025-8869: a symlink must point at another member of the
+                # same archive, or later writes through it could land anywhere
+                # on the host. Python 3.6 has no tarfile.data_filter (PEP 706),
+                # so this extraction loop is the only check.
+                if not is_symlink_target_in_tar(tar, member):
+                    message = (
+                        "The tar file ({}) has a file ({}) trying to install "
+                        "outside target directory ({})"
+                    )
+                    raise InstallationError(
+                        message.format(filename, member.name, member.linkname)
+                    )
                 try:
                     # https://github.com/python/typeshed/issues/2673
                     tar._extract_member(member, path)  # type: ignore
