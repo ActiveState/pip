@@ -9,6 +9,29 @@
 
 .. towncrier release notes start
 
+20.3.4.post3 (2026-10-21)
+=========================
+
+Security Fixes
+--------------
+
+- **CVE-2026-6357**: Run the pip self-version check before the command body
+  and only report its result afterwards, so ``pip install`` can no longer be
+  made to import and execute a module from a just-installed wheel. The check
+  computes supported tags, and the vendored ``packaging`` probes
+  ``import _manylinux`` (the PEP 513/600 override hook) every time it does.
+  (`GHSA-jp4c-xjxw-mgf9 <https://github.com/advisories/GHSA-jp4c-xjxw-mgf9>`_)
+
+.. note
+
+   This corrects the 20.3.4+security.1 notes, which assessed CVE-2026-6357
+   as **not applicable** to 20.3.4. That was wrong: a failed import is never
+   cached in ``sys.modules``, so the ``_manylinux`` probe is retried by the
+   post-install check and picks up a top-level ``_manylinux.py`` that a wheel
+   has just installed. 20.3.4+security.1 and 20.3.4.post2 are affected;
+   ``--disable-pip-version-check`` avoids it on those releases.
+
+
 20.3.4.post2 (2026-10-21)
 =========================
 
@@ -74,6 +97,8 @@ Security Fixes
    dependencies eagerly at startup, and the post-install check touches only
    vendored (``pip._vendor.*``) modules, so a newly-installed wheel has no
    well-known module name to shadow.
+
+   (Corrected in 20.3.4.post3: this release *is* affected, see above.)
 
 
 20.3.4 (2021-01-23)
