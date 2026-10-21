@@ -78,16 +78,16 @@ def test_index_group_commands() -> None:
 @pytest.mark.parametrize(
     "disable_pip_version_check, no_index, expected_called",
     [
-        # pip_self_version_check() is only called when both
-        # disable_pip_version_check and no_index are False.
+        # The fetch phase only runs when both disable_pip_version_check
+        # and no_index are False.
         (False, False, True),
         (False, True, False),
         (True, False, False),
         (True, True, False),
     ],
 )
-@mock.patch("pip._internal.cli.req_command.pip_self_version_check")
-def test_index_group_handle_pip_version_check(
+@mock.patch("pip._internal.cli.req_command.pip_self_version_check_fetch")
+def test_index_group_pip_version_check(
     mock_version_check: mock.Mock,
     command_name: str,
     disable_pip_version_check: bool,
@@ -95,20 +95,68 @@ def test_index_group_handle_pip_version_check(
     expected_called: bool,
 ) -> None:
     """
-    Test whether pip_self_version_check() is called when
-    handle_pip_version_check() is called, for each of the
-    IndexGroupCommand classes.
+    Test whether the pre-body fetch runs when ``pip_version_check()`` is
+    entered, for each of the IndexGroupCommand classes.
     """
     command = create_command(command_name)
     options = command.parser.get_default_values()
     options.disable_pip_version_check = disable_pip_version_check
     options.no_index = no_index
+    # Return None so the emit branch is a no-op.
+    mock_version_check.return_value = None
 
-    command.handle_pip_version_check(options)
+    with command.pip_version_check(options, []):
+        pass
     if expected_called:
         mock_version_check.assert_called_once()
     else:
         mock_version_check.assert_not_called()
+
+
+def test_index_group_pip_version_check_fetches_before_body() -> None:
+    """CVE-2026-6357: the remote check runs before the command body (so before
+    any package is installed) and only the prompt is emitted afterwards."""
+    calls: List[str] = []
+    command = create_command("download")
+    options = command.parser.get_default_values()
+    options.disable_pip_version_check = False
+    options.no_index = False
+
+    with mock.patch(
+        "pip._internal.cli.req_command.pip_self_version_check_fetch",
+        side_effect=lambda session, options: calls.append("fetch"),
+    ), mock.patch(
+        "pip._internal.cli.req_command.pip_self_version_check_emit",
+        side_effect=lambda prompt: calls.append("emit"),
+    ):
+        with command.pip_version_check(options, []):
+            calls.append("body")
+
+    assert calls == ["fetch", "body", "emit"]
+
+
+@mock.patch("pip._internal.cli.req_command.pip_self_version_check_fetch")
+def test_install_pip_version_check_skipped_when_pip_is_a_requirement(
+    mock_version_check: mock.Mock,
+) -> None:
+    """``pip install pip`` must skip the self-version check: the running pip
+    may be replaced before emit."""
+    command = create_command("install")
+    options = command.parser.get_default_values()
+    options.disable_pip_version_check = False
+    options.no_index = False
+
+    with command.pip_version_check(options, ["pip"]):
+        pass
+    mock_version_check.assert_not_called()
+
+    with command.pip_version_check(options, ["pip==25.0"]):
+        pass
+    mock_version_check.assert_not_called()
+
+    with command.pip_version_check(options, ["some-other-pkg"]):
+        pass
+    mock_version_check.assert_called_once()
 
 
 def test_requirement_commands() -> None:
