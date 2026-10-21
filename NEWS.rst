@@ -26,8 +26,9 @@ Security Fixes
   ``[\w.+-]+``, so only ``.`` and ``..`` reached the scripts directory join on
   this release; the check is backported as defense in depth. (`GHSA-wf93-45jw-7689 <https://github.com/advisories/GHSA-wf93-45jw-7689>`_)
 - **CVE-2022-23491** / **CVE-2023-37920**: Upgrade vendored certifi from
-  2020.11.08 to 2026.10.19 (the release vendored by pip 26.2.2, ported to
-  Python 2.7), dropping the distrusted TrustCor and E-Tugra root certificates.
+  2020.11.08 to 2026.10.19.post1 (ActiveState's Python 2.7 build of certifi
+  2026.10.19, the release vendored by pip 26.2.2), dropping the distrusted
+  TrustCor and E-Tugra root certificates.
   This also fixes ``certifi.contents()`` raising ``TypeError`` on Python 2.7.
   (`GHSA-43fp-rhv2-5gv8 <https://github.com/advisories/GHSA-43fp-rhv2-5gv8>`_,
   `GHSA-xqr8-7jwr-rhp7 <https://github.com/advisories/GHSA-xqr8-7jwr-rhp7>`_)
