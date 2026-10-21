@@ -96,6 +96,32 @@ def test_handle_pip_version_check_called(mock_handle_version_check):
     mock_handle_version_check.assert_called_once()
 
 
+def test_version_check_fetch_before_run_emit_after(monkeypatch):
+    """
+    CVE-2026-6357: _main() fetches for the version check before the command
+    body and reports after it.
+    """
+    events = []
+
+    def fetch(self, options, args):
+        events.append('fetch')
+        return 'fetched'
+
+    def emit(self, options, fetched):
+        events.append(('emit', fetched))
+
+    monkeypatch.setattr(Command, '_pip_version_check_fetch', fetch)
+    monkeypatch.setattr(Command, '_pip_version_check_emit', emit)
+
+    def run_func():
+        events.append('run')
+        return SUCCESS
+
+    cmd = FakeCommand(run_func=run_func)
+    assert cmd.main([]) == SUCCESS
+    assert events == ['fetch', 'run', ('emit', 'fetched')]
+
+
 def test_log_command_success(fixed_time, tmpdir):
     """Test the --log option logs when command succeeds."""
     cmd = FakeCommand()

@@ -100,6 +100,25 @@ class Command(CommandContextMixIn):
         # are present.
         assert not hasattr(options, 'no_index')
 
+    def _pip_version_check_fetch(self, options, args):
+        # type: (Values, List[str]) -> Any
+        """Gather what the pip version check needs, before the command runs.
+
+        The result is passed to _pip_version_check_emit() once the command
+        body has finished. Doing the lookups up front means nothing is
+        imported after packages have been installed (CVE-2026-6357).
+        """
+        return None
+
+    def _pip_version_check_emit(self, options, fetched):
+        # type: (Values, Any) -> None
+        """Report the pip version check after the command has run.
+
+        By default this calls handle_pip_version_check(), which is a no-op
+        for commands without the index_group options.
+        """
+        self.handle_pip_version_check(options)
+
     def run(self, options, args):
         # type: (Values, List[Any]) -> int
         raise NotImplementedError
@@ -219,6 +238,10 @@ class Command(CommandContextMixIn):
                 "This will become an error in pip 21.0."
             )
 
+        # The version check does its lookups before the command body runs and
+        # only reports afterwards, so nothing is imported once packages have
+        # been installed (CVE-2026-6357).
+        version_check = self._pip_version_check_fetch(options, args)
         try:
             status = self.run(options, args)
             assert isinstance(status, int)
@@ -257,4 +280,4 @@ class Command(CommandContextMixIn):
 
             return UNKNOWN_ERROR
         finally:
-            self.handle_pip_version_check(options)
+            self._pip_version_check_emit(options, version_check)

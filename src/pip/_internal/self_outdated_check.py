@@ -20,7 +20,7 @@ from pip._internal.utils.typing import MYPY_CHECK_RUNNING
 
 if MYPY_CHECK_RUNNING:
     import optparse
-    from typing import Any, Dict, Text, Union
+    from typing import Any, Dict, Optional, Text, Tuple, Union
 
     from pip._internal.network.session import PipSession
 
@@ -118,10 +118,32 @@ def pip_self_version_check(session, options):
     Limit the frequency of checks to once per week. State is stored either in
     the active virtualenv or in the user's USER_CACHE_DIR keyed off the prefix
     of the pip script path.
+
+    This fetches and reports in one go. Commands run the two halves
+    separately (_pip_self_version_check_fetch before the command body,
+    _pip_self_version_check_emit after it) so that nothing is looked up or
+    imported once packages have been installed (CVE-2026-6357).
+    """
+    _pip_self_version_check_emit(
+        _pip_self_version_check_fetch(session, options)
+    )
+
+
+def _pip_self_version_check_fetch(session, options):
+    # type: (PipSession, optparse.Values) -> Optional[Tuple[str, str]]
+    """Do all the work of the pip self-version check, except reporting.
+
+    Returns ``(installed_version, pypi_version)`` when an upgrade prompt
+    should be shown, otherwise None. This queries the index, computes the
+    supported tags and inspects the installed pip distribution, so it must
+    run before a command can install anything: the vendored packaging probes
+    ``import _manylinux`` while computing tags, and a failed import is not
+    cached, so after an install it would import whatever module of that name
+    a just-installed wheel provided (CVE-2026-6357).
     """
     installed_version = get_installed_version("pip")
     if not installed_version:
-        return
+        return None
 
     pip_version = packaging_version.parse(installed_version)
     pypi_version = None
@@ -161,7 +183,7 @@ def pip_self_version_check(session, options):
             )
             best_candidate = finder.find_best_candidate("pip").best_candidate
             if best_candidate is None:
-                return
+                return None
             pypi_version = str(best_candidate.version)
 
             # save that we've performed a check
@@ -177,21 +199,36 @@ def pip_self_version_check(session, options):
 
         # Determine if our pypi_version is older
         if not local_version_is_older:
-            return
+            return None
 
-        # We cannot tell how the current pip is available in the current
-        # command context, so be pragmatic here and suggest the command
-        # that's always available. This does not accommodate spaces in
-        # `sys.executable`.
-        pip_cmd = "{} -m pip".format(sys.executable)
-        logger.warning(
-            "You are using pip version %s; however, version %s is "
-            "available.\nYou should consider upgrading via the "
-            "'%s install --upgrade pip' command.",
-            pip_version, pypi_version, pip_cmd
-        )
+        return str(pip_version), str(pypi_version)
     except Exception:
         logger.debug(
             "There was an error checking the latest version of pip",
             exc_info=True,
         )
+        return None
+
+
+def _pip_self_version_check_emit(upgrade_prompt):
+    # type: (Optional[Tuple[str, str]]) -> None
+    """Report the result of _pip_self_version_check_fetch, if any.
+
+    Only logs: it must not query the index or import anything, because it
+    runs after the command body (CVE-2026-6357).
+    """
+    if upgrade_prompt is None:
+        return
+
+    pip_version, pypi_version = upgrade_prompt
+    # We cannot tell how the current pip is available in the current
+    # command context, so be pragmatic here and suggest the command
+    # that's always available. This does not accommodate spaces in
+    # `sys.executable`.
+    pip_cmd = "{} -m pip".format(sys.executable)
+    logger.warning(
+        "You are using pip version %s; however, version %s is "
+        "available.\nYou should consider upgrading via the "
+        "'%s install --upgrade pip' command.",
+        pip_version, pypi_version, pip_cmd
+    )

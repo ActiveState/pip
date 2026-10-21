@@ -27,7 +27,11 @@ from pip._internal.req.constructors import (
     install_req_from_req_string,
 )
 from pip._internal.req.req_file import parse_requirements
-from pip._internal.self_outdated_check import pip_self_version_check
+from pip._internal.self_outdated_check import (
+    _pip_self_version_check_emit,
+    _pip_self_version_check_fetch,
+    pip_self_version_check,
+)
 from pip._internal.utils.temp_dir import tempdir_kinds
 from pip._internal.utils.typing import MYPY_CHECK_RUNNING
 
@@ -151,6 +155,43 @@ class IndexGroupCommand(Command, SessionCommandMixin):
         )
         with session:
             pip_self_version_check(session, options)
+
+    def _pip_version_check_fetch(self, options, args):
+        # type: (Values, List[str]) -> Any
+        """Query the index for the latest pip before the command body runs.
+
+        handle_pip_version_check() does the same check in one step, but run
+        after `pip install` it would compute supported tags, which probes
+        ``import _manylinux``, and could import a module that a just-installed
+        wheel provided (CVE-2026-6357). So _main() fetches here and only
+        reports in _pip_version_check_emit().
+        """
+        # Make sure the index_group options are present.
+        assert hasattr(options, 'no_index')
+
+        if options.disable_pip_version_check or options.no_index:
+            return None
+
+        try:
+            session = self._build_session(
+                options,
+                retries=0,
+                timeout=min(5, options.timeout)
+            )
+            with session:
+                return _pip_self_version_check_fetch(session, options)
+        except Exception:
+            logger.debug(
+                "There was an error checking the latest version of pip",
+                exc_info=True,
+            )
+            return None
+
+    def _pip_version_check_emit(self, options, fetched):
+        # type: (Values, Any) -> None
+        # Only report what was fetched before the command ran. Do not fall
+        # back to handle_pip_version_check(), which would query again now.
+        _pip_self_version_check_emit(fetched)
 
 
 KEEPABLE_TEMPDIR_TYPES = [
