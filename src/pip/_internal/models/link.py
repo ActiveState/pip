@@ -4,7 +4,16 @@ import os
 import posixpath
 import re
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    NamedTuple,
+    NewType,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from pip._internal.utils.filetypes import WHEEL_EXTENSION
 from pip._internal.utils.hashes import Hashes
@@ -20,6 +29,52 @@ if TYPE_CHECKING:
     from pip._internal.index.collector import HTMLPage
 
 logger = logging.getLogger(__name__)
+
+
+# A single path component: percent-decoded once and reduced to a basename, so it
+# contains no path separator and is not a ``.`` or ``..`` reference. The empty
+# string means "no component".
+PathComponent = NewType("PathComponent", str)
+
+
+def _to_path_component(name: str) -> PathComponent:
+    """Reduce ``name`` to a single path component, or ``""`` if it has none.
+
+    ``os.path.basename`` drops any directory part, drive letter, or separator;
+    a ``.``, ``..``, or empty result is not a component and becomes ``""``.
+    """
+    name = os.path.basename(name)
+    if name in ("", os.curdir, os.pardir):
+        return PathComponent("")
+
+    return PathComponent(name)
+
+
+def as_path_component(name: str) -> PathComponent:
+    """Like ``_to_path_component`` but reject the empty result.
+
+    Use where a file is about to be written, so a missing name is an error
+    rather than a silent fallback to the directory itself.
+    """
+    component = _to_path_component(name)
+    if not component:
+        raise ValueError(f"Unexpected file name derived from URL: {name!r}")
+
+    return component
+
+
+def join_within_directory(directory: str, component: PathComponent) -> str:
+    """Join a single path ``component`` onto ``directory``.
+
+    ``component`` is a :data:`PathComponent`, so by type it has no separator and
+    is not a ``.`` or ``..`` reference; the result can never escape ``directory``.
+    ``NewType`` is only enforced by the type checker, so the guarantee is also
+    checked at runtime here.
+    """
+    if not component or component != _to_path_component(component):
+        raise ValueError(f"Not a single path component: {component!r}")
+
+    return os.path.join(directory, component)
 
 
 _SUPPORTED_HASHES = ("sha1", "sha224", "sha384", "sha256", "sha512", "md5")
@@ -103,18 +158,15 @@ class Link(KeyBasedCompareMixin):
         return self._url
 
     @property
-    def filename(self) -> str:
-        path = self.path.rstrip("/")
-        name = posixpath.basename(path)
-        if not name:
-            # Make sure we don't leak auth information if the netloc
-            # includes a username and password.
-            netloc, user_pass = split_auth_from_netloc(self.netloc)
-            return netloc
+    def filename(self) -> PathComponent:
+        # self.path is already percent-decoded; decoding it again would turn a
+        # doubly-encoded separator (%252F) into a real "/" (CVE-2026-13346).
+        name = _to_path_component(posixpath.basename(self.path.rstrip("/")))
+        if name:
+            return name
 
-        name = urllib.parse.unquote(name)
-        assert name, f"URL {self._url!r} produced no filename"
-        return name
+        # No component in the path; fall back to the netloc, dropping any auth.
+        return _to_path_component(split_auth_from_netloc(self.netloc)[0])
 
     @property
     def file_path(self) -> str:
