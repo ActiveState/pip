@@ -1,11 +1,13 @@
+import contextlib
 import errno
 import operator
 import os
 import shutil
 import site
 from optparse import SUPPRESS_HELP, Values
-from typing import Iterable, List, Optional
+from typing import Iterable, Iterator, List, Optional
 
+from pip._vendor.packaging.requirements import InvalidRequirement, Requirement
 from pip._vendor.packaging.utils import canonicalize_name
 
 from pip._internal.cache import WheelCache
@@ -56,6 +58,14 @@ def get_check_binary_allowed(format_control: FormatControl) -> BinaryAllowedPred
         return "binary" in allowed_formats
 
     return check_binary_allowed
+
+
+def _arg_refers_to_pip(arg: str) -> bool:
+    try:
+        req = Requirement(arg)
+    except InvalidRequirement:
+        return False
+    return canonicalize_name(req.name) == "pip"
 
 
 class InstallCommand(RequirementCommand):
@@ -236,6 +246,17 @@ class InstallCommand(RequirementCommand):
 
         self.parser.insert_option_group(0, index_opts)
         self.parser.insert_option_group(0, self.cmd_opts)
+
+    @contextlib.contextmanager
+    def pip_version_check(self, options: Values, args: List[str]) -> Iterator[None]:
+        # Skip the self-version check when pip itself is a requirement. The
+        # running pip may be replaced mid-command, and the upgrade prompt
+        # is redundant.
+        if any(_arg_refers_to_pip(arg) for arg in args):
+            yield
+            return
+        with super().pip_version_check(options, args):
+            yield
 
     @with_cleanup
     def run(self, options: Values, args: List[str]) -> int:

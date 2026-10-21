@@ -16,8 +16,11 @@ from pip._internal.models.link import Link
 from pip._internal.network.session import PipSession
 from pip._internal.self_outdated_check import (
     SelfCheckState,
+    UpgradePrompt,
     logger,
     pip_self_version_check,
+    pip_self_version_check_emit,
+    pip_self_version_check_fetch,
 )
 from tests.lib.path import Path
 
@@ -161,6 +164,78 @@ def test_pip_self_version_check(
         assert cast(mock.Mock, logger.warning).call_count == 1
     else:
         assert cast(mock.Mock, logger.warning).call_count == 0
+
+
+def test_pip_self_version_check_fetch_returns_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        self_outdated_check,
+        "get_default_environment",
+        functools.partial(MockEnvironment, "pip", "1.0"),
+    )
+    monkeypatch.setattr(self_outdated_check, "PackageFinder", MockPackageFinder)
+    fake_state = mock.Mock(state={}, save=mock.Mock())
+    monkeypatch.setattr(self_outdated_check, "SelfCheckState", lambda **kw: fake_state)
+    monkeypatch.setattr(logger, "warning", mock.Mock())
+
+    result = pip_self_version_check_fetch(PipSession(), _options())
+
+    assert result == UpgradePrompt(old="1.0", new="6.9.0")
+    # Fetching never prints; that is the emit phase's job.
+    assert not cast(mock.Mock, logger.warning).called
+
+
+def test_fetch_skipped_when_pip_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        self_outdated_check,
+        "get_default_environment",
+        functools.partial(MockEnvironment, "pip", None),
+    )
+    finder = mock.Mock()
+    monkeypatch.setattr(self_outdated_check, "PackageFinder", finder)
+
+    assert pip_self_version_check_fetch(PipSession(), _options()) is None
+    finder.create.assert_not_called()
+
+
+def test_pip_self_version_check_emit_logs_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(logger, "warning", mock.Mock())
+    pip_self_version_check_emit(UpgradePrompt(old="1.0", new="2.0"))
+    warning = cast(mock.Mock, logger.warning)
+    assert warning.call_count == 1
+    assert warning.call_args[0][1:3] == ("1.0", "2.0")
+
+
+def test_pip_self_version_check_emit_no_prompt_is_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(logger, "warning", mock.Mock())
+    pip_self_version_check_emit(None)
+    assert not cast(mock.Mock, logger.warning).called
+
+
+def test_pip_self_version_check_emit_does_not_inspect_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CVE-2026-6357: emit runs after packages may have been installed, so it
+    must not rebuild a PackageFinder or query the environment. Either of those
+    reaches packaging.tags, which imports ``_manylinux`` from sys.path."""
+
+    def boom(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("emit must not inspect the environment")
+
+    monkeypatch.setattr(self_outdated_check, "get_default_environment", boom)
+    monkeypatch.setattr(self_outdated_check, "PackageFinder", mock.Mock(create=boom))
+    monkeypatch.setattr(self_outdated_check, "LinkCollector", mock.Mock(create=boom))
+    monkeypatch.setattr(logger, "warning", mock.Mock())
+
+    pip_self_version_check_emit(UpgradePrompt(old="1.0", new="2.0"))
+    assert cast(mock.Mock, logger.warning).call_count == 1
 
 
 statefile_name_case_1 = "fcd2d5175dd33d5df759ee7b045264230205ef837bf9f582f7c3ada7"

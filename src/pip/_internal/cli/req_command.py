@@ -5,12 +5,13 @@ needing download / PackageFinder capability don't unnecessarily import the
 PackageFinder machinery and all its vendored dependencies, etc.
 """
 
+import contextlib
 import logging
 import os
 import sys
 from functools import partial
 from optparse import Values
-from typing import Any, List, Optional, Tuple
+from typing import Any, Iterator, List, Optional, Tuple
 
 from pip._internal.cache import WheelCache
 from pip._internal.cli import cmdoptions
@@ -33,7 +34,11 @@ from pip._internal.req.req_file import parse_requirements
 from pip._internal.req.req_install import InstallRequirement
 from pip._internal.req.req_tracker import RequirementTracker
 from pip._internal.resolution.base import BaseResolver
-from pip._internal.self_outdated_check import pip_self_version_check
+from pip._internal.self_outdated_check import (
+    UpgradePrompt,
+    pip_self_version_check_emit,
+    pip_self_version_check_fetch,
+)
 from pip._internal.utils.deprecation import deprecated
 from pip._internal.utils.temp_dir import (
     TempDirectory,
@@ -128,24 +133,45 @@ class IndexGroupCommand(Command, SessionCommandMixin):
     This also corresponds to the commands that permit the pip version check.
     """
 
-    def handle_pip_version_check(self, options: Values) -> None:
+    @contextlib.contextmanager
+    def pip_version_check(self, options: Values, args: List[str]) -> Iterator[None]:
         """
         Do the pip version check if not disabled.
 
-        This overrides the default behavior of not doing the check.
+        This overrides the default behavior of not doing the check. The
+        remote version is fetched before the command body runs and the
+        upgrade prompt is only emitted afterwards, so the check never imports
+        modules after packages have been installed (CVE-2026-6357).
         """
         # Make sure the index_group options are present.
         assert hasattr(options, "no_index")
 
         if options.disable_pip_version_check or options.no_index:
+            yield
             return
 
-        # Otherwise, check if we're using the latest version of pip available.
-        session = self._build_session(
-            options, retries=0, timeout=min(5, options.timeout)
-        )
-        with session:
-            pip_self_version_check(session, options)
+        upgrade_prompt: Optional[UpgradePrompt] = None
+        try:
+            # Otherwise, check if we're using the latest version of pip available.
+            session = self._build_session(
+                options, retries=0, timeout=min(5, options.timeout)
+            )
+            with session:
+                upgrade_prompt = pip_self_version_check_fetch(session, options)
+        except Exception:
+            logger.warning("There was an error checking the latest version of pip.")
+            logger.debug("See below for error", exc_info=True)
+
+        try:
+            yield
+        finally:
+            try:
+                pip_self_version_check_emit(upgrade_prompt)
+            except Exception:
+                logger.warning(
+                    "There was an error checking the latest version of pip."
+                )
+                logger.debug("See below for error", exc_info=True)
 
 
 KEEPABLE_TEMPDIR_TYPES = [
