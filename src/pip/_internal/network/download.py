@@ -10,6 +10,7 @@ from pip._vendor.requests.models import CONTENT_CHUNK_SIZE
 from pip._internal.cli.progress_bars import DownloadProgressProvider
 from pip._internal.exceptions import NetworkConnectionError
 from pip._internal.models.index import PyPI
+from pip._internal.models.link import as_path_component, join_within_directory
 from pip._internal.network.cache import is_from_cache
 from pip._internal.network.utils import HEADERS, raise_for_status, response_chunks
 from pip._internal.utils.misc import format_size, redact_auth_from_url, splitext
@@ -105,6 +106,9 @@ def _get_http_response_filename(resp, link):
     # type: (Response, Link) -> str
     """Get an ideal filename from the given HTTP response, falling back to
     the link filename if not provided.
+
+    The result is validated as a single path component, so it can be joined
+    onto a download directory without escaping it.
     """
     filename = link.filename  # fallback
     # Have a look at the Content-Disposition header for a better guess
@@ -122,7 +126,7 @@ def _get_http_response_filename(resp, link):
         ext = os.path.splitext(resp.url)[1]
         if ext:
             filename += ext
-    return filename
+    return as_path_component(filename)
 
 
 def _http_get_download(session, link):
@@ -156,7 +160,7 @@ class Downloader(object):
             raise
 
         filename = _get_http_response_filename(resp, link)
-        filepath = os.path.join(location, filename)
+        filepath = join_within_directory(location, filename)
 
         chunks = _prepare_download(resp, link, self._progress_bar)
         with open(filepath, 'wb') as content_file:
@@ -192,7 +196,7 @@ class BatchDownloader(object):
                 raise
 
             filename = _get_http_response_filename(resp, link)
-            filepath = os.path.join(location, filename)
+            filepath = join_within_directory(location, filename)
 
             chunks = _prepare_download(resp, link, self._progress_bar)
             with open(filepath, 'wb') as content_file:
