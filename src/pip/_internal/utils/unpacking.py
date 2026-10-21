@@ -81,7 +81,10 @@ def is_within_directory(directory: str, target: str) -> bool:
     abs_directory = os.path.abspath(directory)
     abs_target = os.path.abspath(target)
 
-    prefix = os.path.commonprefix([abs_directory, abs_target])
+    # os.path.commonprefix compares character-by-character, so it treated
+    # "/a/parentfoo" as within "/a/parent" (CVE-2026-1703); commonpath
+    # compares whole path components.
+    prefix = os.path.commonpath([abs_directory, abs_target])
     return prefix == abs_directory
 
 
