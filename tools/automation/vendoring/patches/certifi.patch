@@ -1,13 +1,46 @@
 diff --git a/src/pip/_vendor/certifi/core.py b/src/pip/_vendor/certifi/core.py
-index 5d2b8cd32..8987449f6 100644
+index c7aecb8..ae33144 100644
 --- a/src/pip/_vendor/certifi/core.py
 +++ b/src/pip/_vendor/certifi/core.py
-@@ -33,7 +33,7 @@ try:
+@@ -39,7 +39,7 @@ if sys.version_info >= (3, 11):
+             # We also have to hold onto the actual context manager, because
+             # it will do the cleanup whenever it gets garbage collected, so
+             # we will also store that at the global level as well.
+-            _CACERT_CTX = as_file(files("certifi").joinpath("cacert.pem"))
++            _CACERT_CTX = as_file(files("pip._vendor.certifi").joinpath("cacert.pem"))
+             _CACERT_PATH = str(_CACERT_CTX.__enter__())
+             atexit.register(exit_cacert_ctx)
+ 
+@@ -47,7 +47,7 @@ if sys.version_info >= (3, 11):
+ 
+     def contents():
+         # type: () -> str
+-        return files("certifi").joinpath("cacert.pem").read_text(encoding="ascii")
++        return files("pip._vendor.certifi").joinpath("cacert.pem").read_text(encoding="ascii")
+ 
+ elif sys.version_info >= (3, 7):
+ 
+@@ -77,7 +77,7 @@ elif sys.version_info >= (3, 7):
              # We also have to hold onto the actual context manager, because
              # it will do the cleanup whenever it gets garbage collected, so
              # we will also store that at the global level as well.
 -            _CACERT_CTX = get_path("certifi", "cacert.pem")
 +            _CACERT_CTX = get_path("pip._vendor.certifi", "cacert.pem")
              _CACERT_PATH = str(_CACERT_CTX.__enter__())
-
-         return _CACERT_PATH
+             atexit.register(exit_cacert_ctx)
+ 
+@@ -85,7 +85,7 @@ elif sys.version_info >= (3, 7):
+ 
+     def contents():
+         # type: () -> str
+-        return read_text("certifi", "cacert.pem", encoding="ascii")
++        return read_text("pip._vendor.certifi", "cacert.pem", encoding="ascii")
+ 
+ else:
+     import io
+@@ -112,4 +112,4 @@ else:
+ 
+     def contents():
+         # type: () -> str
+-        return read_text("certifi", "cacert.pem", encoding="ascii")
++        return read_text("pip._vendor.certifi", "cacert.pem", encoding="ascii")
