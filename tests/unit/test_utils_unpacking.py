@@ -350,6 +350,75 @@ class TestUnpackArchives:
 
         assert not os.path.exists(outside_path)
 
+    def test_unpack_tar_dot_prefixed_symlink(self) -> None:
+        """A "./"-prefixed archive (``tar -C dir .``) with a symlink unpacks."""
+        tar_filepath = os.path.join(self.tempdir, "dot_prefixed.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            for name in ("./", "./pkg"):
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+
+            data = io.BytesIO(b"target\n")
+            info = tarfile.TarInfo("./pkg/target.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+            info = tarfile.TarInfo("./pkg/link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "target.txt"
+            tar.addfile(info)
+
+        untar_file(tar_filepath, extract_path)
+
+        with open(os.path.join(extract_path, "pkg", "link"), "rb") as f:
+            assert f.read() == b"target\n"
+
+    def test_unpack_tar_symlink_to_implied_directory(self) -> None:
+        """A symlink to a directory with no entry of its own unpacks."""
+        tar_filepath = os.path.join(self.tempdir, "implied_dir.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            data = io.BytesIO(b"nested\n")
+            info = tarfile.TarInfo("pkg/sub/file.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+            info = tarfile.TarInfo("pkg/link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "sub"
+            tar.addfile(info)
+
+        untar_file(tar_filepath, extract_path)
+
+        # untar_file strips the shared leading "pkg/" directory.
+        with open(os.path.join(extract_path, "link", "file.txt"), "rb") as f:
+            assert f.read() == b"nested\n"
+
+    def test_unpack_tar_symlink_to_non_member_rejected(self) -> None:
+        """A symlink whose in-tree target is not in the archive is still refused."""
+        tar_filepath = os.path.join(self.tempdir, "dangling.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            data = io.BytesIO(b"x\n")
+            info = tarfile.TarInfo("pkg/file.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+            info = tarfile.TarInfo("pkg/link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "missing.txt"
+            tar.addfile(info)
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
+        assert not os.path.lexists(os.path.join(extract_path, "pkg", "link"))
+
 
 def test_unpack_tar_unicode(tmpdir: Path) -> None:
     test_tar = tmpdir / "test.tar"
