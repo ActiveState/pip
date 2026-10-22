@@ -21,8 +21,41 @@ Security Fixes
   computes supported tags, and the vendored ``packaging`` probes
   ``import _manylinux`` (the PEP 513/600 override hook) every time it does.
   (`GHSA-jp4c-xjxw-mgf9 <https://github.com/advisories/GHSA-jp4c-xjxw-mgf9>`_)
+- **CVE-2025-8869** (hardening): Port upstream's follow-up fix (pypa/pip#14127)
+  to the tar extraction path, which is the only one on Python 2.7 (there is no
+  ``tarfile.data_filter``). A member is now rejected unless its resolved
+  (``realpath``) destination stays inside the extract directory, and a symlink
+  is rejected when its resolved target leaves it. Previously a symlink to
+  ``.`` or ``..`` (both archive members) let a later member be written outside
+  the extract directory. 20.3.4+security.1 and 20.3.4.post2 are affected.
+  (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
+- **CVE-2023-5752** (regression fix): Pass a Mercurial revision as
+  ``--rev=<rev>`` instead of ``-r=<rev>`` (pypa/pip#12373). Mercurial parses
+  ``-r=<rev>`` as the revision ``=<rev>`` and fails, so every
+  ``hg+...@<rev>`` install has been broken since 20.3.4+security.1 (also in
+  20.3.4.post2). The revision is still a single token, so the CVE protection
+  is unchanged.
+  (`GHSA-mq26-g339-26xf <https://github.com/advisories/GHSA-mq26-g339-26xf>`_)
 
-.. note
+Bug Fixes
+---------
+
+- ``is_within_directory`` and the CVE-2026-8643 entry point check accept a
+  directory that is a filesystem root (``/`` or ``C:\``); previously every
+  target, and every entry point, was rejected there.
+- The pre-command version-check lookup now runs inside pip's error handling,
+  so Ctrl-C during it reports "Operation cancelled by user", and a malformed
+  requirement such as ``foo @ http://[bad/x`` gets pip's normal error report
+  instead of a raw traceback.
+- Symlinks in an sdist are matched against normalized member names, including
+  implied parent directories, so ``./``-prefixed archives (``tar -C dir .``)
+  and links to a directory without its own entry unpack again. Containment is
+  still enforced by the ``realpath`` checks above.
+- A download whose file name is not a single safe path component (e.g.
+  ``Content-Disposition: filename=".."``) is reported as a pip ``ERROR:``
+  line instead of a traceback. It was already refused.
+
+.. note::
 
    This corrects the 20.3.4+security.1 notes, which assessed CVE-2026-6357
    as **not applicable** to 20.3.4. That was wrong: a failed import is never
@@ -56,7 +89,7 @@ Security Fixes
   (`GHSA-43fp-rhv2-5gv8 <https://github.com/advisories/GHSA-43fp-rhv2-5gv8>`_,
   `GHSA-xqr8-7jwr-rhp7 <https://github.com/advisories/GHSA-xqr8-7jwr-rhp7>`_)
 
-.. note
+.. note::
 
    CVE-2024-39689 / GHSA-248v-346w-9cwc (certifi GLOBALTRUST roots) was
    assessed and found **not applicable**: those roots were added in certifi
@@ -90,7 +123,7 @@ Security Fixes
   (instead of a character-prefix comparison) so an extracted file cannot land in
   a sibling directory whose name is a prefix of the install path. (`GHSA-6vgw-5pg2-w6jp <https://github.com/advisories/GHSA-6vgw-5pg2-w6jp>`_)
 
-.. note
+.. note::
 
    CVE-2026-6357 / GHSA-jp4c-xjxw-mgf9 was assessed and found **not applicable**
    to this release: pip 20.3.4 imports the self-version-check and all of its
