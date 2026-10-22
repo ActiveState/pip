@@ -1,5 +1,6 @@
 """Base Command class, and related routines"""
 
+import contextlib
 import functools
 import logging
 import logging.config
@@ -8,7 +9,7 @@ import os
 import sys
 import traceback
 from optparse import Values
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Iterator, List, Optional, Tuple
 
 from pip._vendor.rich import traceback as rich_traceback
 
@@ -79,7 +80,8 @@ class Command(CommandContextMixIn):
     def add_options(self) -> None:
         pass
 
-    def handle_pip_version_check(self, options: Values) -> None:
+    @contextlib.contextmanager
+    def pip_version_check(self, options: Values, args: List[str]) -> Iterator[None]:
         """
         This is a no-op so that commands by default do not do the pip version
         check.
@@ -87,6 +89,7 @@ class Command(CommandContextMixIn):
         # Make sure we do the pip version check if the index_group options
         # are present.
         assert not hasattr(options, "no_index")
+        yield
 
     def run(self, options: Values, args: List[str]) -> int:
         raise NotImplementedError
@@ -225,12 +228,18 @@ class Command(CommandContextMixIn):
 
             return exc_logging_wrapper
 
-        try:
-            if not options.debug_mode:
-                run = intercepts_unhandled_exc(self.run)
-            else:
-                run = self.run
-                rich_traceback.install(show_locals=True)
-            return run(options, args)
-        finally:
-            self.handle_pip_version_check(options)
+        def _inner_run(options: Values, args: List[str]) -> int:
+            # The version check fetches everything it needs before the command
+            # body runs, and only prints its prompt afterwards, so nothing is
+            # imported after packages have been installed (CVE-2026-6357). It
+            # runs inside the error interception below, like the body, so an
+            # error or Ctrl-C during the fetch is reported the usual way.
+            with self.pip_version_check(options, args):
+                return self.run(options, args)
+
+        if not options.debug_mode:
+            run = intercepts_unhandled_exc(_inner_run)
+        else:
+            run = _inner_run
+            rich_traceback.install(show_locals=True)
+        return run(options, args)

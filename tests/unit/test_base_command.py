@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import os
 import time
@@ -9,7 +10,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from pip._internal.cli.base_command import Command
-from pip._internal.cli.status_codes import SUCCESS
+from pip._internal.cli.status_codes import ERROR, SUCCESS, UNKNOWN_ERROR
 from pip._internal.utils import temp_dir
 from pip._internal.utils.logging import BrokenStdoutLoggingError
 from pip._internal.utils.temp_dir import TempDirectory
@@ -93,14 +94,43 @@ class TestCommand:
         assert "Traceback (most recent call last):" in stderr
 
 
-@patch("pip._internal.cli.req_command.Command.handle_pip_version_check")
-def test_handle_pip_version_check_called(mock_handle_version_check: Mock) -> None:
+@patch("pip._internal.cli.req_command.Command.pip_version_check")
+def test_pip_version_check_called(mock_version_check: Mock) -> None:
     """
-    Check that Command.handle_pip_version_check() is called.
+    Check that ``Command.pip_version_check()`` wraps the command body.
     """
     cmd = FakeCommand()
     cmd.main([])
-    mock_handle_version_check.assert_called_once()
+    mock_version_check.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "exc, status, message",
+    [
+        (KeyboardInterrupt, ERROR, "Operation cancelled by user"),
+        (ValueError("boom"), UNKNOWN_ERROR, "Exception:"),
+    ],
+)
+def test_pip_version_check_errors_are_intercepted(
+    capsys: pytest.CaptureFixture[str],
+    exc: BaseException,
+    status: int,
+    message: str,
+) -> None:
+    """
+    An error or Ctrl-C while the version check fetches (before the command
+    body runs) goes through pip's normal error handling, not a raw traceback.
+    """
+
+    class FailingCheckCommand(FakeCommand):
+        @contextlib.contextmanager
+        def pip_version_check(self, options: Values, args: List[str]) -> Iterator[None]:
+            raise exc
+            yield  # pragma: no cover
+
+    cmd = FailingCheckCommand()
+    assert cmd.main([]) == status
+    assert message in capsys.readouterr().err
 
 
 def test_log_command_success(fixed_time: None, tmpdir: Path) -> None:

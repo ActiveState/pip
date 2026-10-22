@@ -3,11 +3,12 @@
 
 import logging
 import os
+import posixpath
 import shutil
 import stat
 import tarfile
 import zipfile
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Set
 from zipfile import ZipInfo
 
 from pip._internal.exceptions import InstallationError
@@ -74,29 +75,71 @@ def has_leading_dir(paths: Iterable[str]) -> bool:
     return True
 
 
-def is_within_directory(directory: str, target: str) -> bool:
+def is_within_directory(
+    directory: str, target: str, *, resolve_symlinks: bool = False
+) -> bool:
     """
     Return true if the absolute path of target is within the directory
+    (including when target is equal to the directory).
+
+    When ``resolve_symlinks`` is true, resolve symlinks before comparing so
+    traversal through a symlink (e.g. "link/../file") is also caught.
     """
-    abs_directory = os.path.abspath(directory)
-    abs_target = os.path.abspath(target)
+    if resolve_symlinks:
+        abs_directory = os.path.realpath(directory)
+        abs_target = os.path.realpath(target)
+    else:
+        abs_directory = os.path.abspath(directory)
+        abs_target = os.path.abspath(target)
 
-    prefix = os.path.commonpath([abs_directory, abs_target])
-    return prefix == abs_directory
-
-
-def is_symlink_target_in_tar(tar: tarfile.TarFile, tarinfo: tarfile.TarInfo) -> bool:
-    """Check if the file pointed to by the symbolic link is in the tar archive"""
-    linkname = os.path.join(os.path.dirname(tarinfo.name), tarinfo.linkname)
-
-    linkname = os.path.normpath(linkname)
-    linkname = linkname.replace("\\", "/")
-
-    try:
-        tar.getmember(linkname)
+    if abs_target == abs_directory:
         return True
-    except KeyError:
-        return False
+    # A filesystem root ("/" or "C:\\") already ends with a separator; appending
+    # another would reject everything. abspath keeps a POSIX "//" prefix, which
+    # os.path.commonpath would drop.
+    prefix = abs_directory if abs_directory.endswith(os.sep) else abs_directory + os.sep
+    return abs_target.startswith(prefix)
+
+
+def _tar_member_paths(tar: tarfile.TarFile) -> Set[str]:
+    """Normalized member paths plus every implied parent directory."""
+    paths = set()
+    for member in tar.getmembers():
+        name = posixpath.normpath(member.name.replace("\\", "/"))
+        if name == ".":
+            # An explicit "." / "./" member is the archive root. Record it so a
+            # symlink resolving to the root (e.g. "./sub/root -> ..") is found,
+            # as tar.getmember(".") did. The root is never added implicitly.
+            paths.add(name)
+            continue
+        while name not in ("", ".", "/"):
+            paths.add(name)
+            parent = posixpath.dirname(name)
+            if parent == name:
+                # posixpath.dirname("//") == "//": stop at any fixed point.
+                break
+            name = parent
+    return paths
+
+
+def is_symlink_target_in_tar(
+    tar: tarfile.TarFile,
+    tarinfo: tarfile.TarInfo,
+    *,
+    member_paths: Optional[Set[str]] = None,
+) -> bool:
+    """Check if the file pointed to by the symbolic link is in the tar archive
+
+    Member names are compared after normalization, and a directory that only
+    exists implicitly (as the parent of other members) counts as present, so
+    "./"-prefixed archives and links to directories without their own entry
+    are accepted. Containment is enforced separately by is_within_directory().
+    """
+    linkname = os.path.join(os.path.dirname(tarinfo.name), tarinfo.linkname)
+    linkname = posixpath.normpath(linkname.replace("\\", "/"))
+    if member_paths is None:
+        member_paths = _tar_member_paths(tar)
+    return linkname in member_paths
 
 
 def set_extracted_file_to_default_mode_plus_executable(path: str) -> None:
@@ -187,12 +230,19 @@ def untar_file(filename: str, location: str) -> None:
     tar = tarfile.open(filename, mode, encoding="utf-8")
     try:
         leading = has_leading_dir([member.name for member in tar.getmembers()])
+        member_paths = _tar_member_paths(tar)
         for member in tar.getmembers():
             fn = member.name
             if leading:
                 fn = split_leading_dir(fn)[1]
             path = os.path.join(location, fn)
-            if not is_within_directory(location, path):
+
+            # The plain check rejects textual ".." escapes; resolving symlinks also
+            # catches a later member redirected outside by an earlier member's
+            # symlink (e.g. "link/../file").
+            if not is_within_directory(location, path) or not is_within_directory(
+                location, path, resolve_symlinks=True
+            ):
                 message = (
                     "The tar file ({}) has a file ({}) trying to install "
                     "outside target directory ({})"
@@ -201,7 +251,18 @@ def untar_file(filename: str, location: str) -> None:
             if member.isdir():
                 ensure_dir(path)
             elif member.issym():
-                if not is_symlink_target_in_tar(tar, member):
+                # Reject symlinks resolving outside the destination, so a later
+                # member cannot be written through them.
+                target = os.path.join(os.path.dirname(path), member.linkname)
+                if not is_within_directory(location, target, resolve_symlinks=True):
+                    message = (
+                        "The tar file ({}) has a file ({}) trying to install "
+                        "outside target directory ({})"
+                    )
+                    raise InstallationError(
+                        message.format(filename, member.name, member.linkname)
+                    )
+                if not is_symlink_target_in_tar(tar, member, member_paths=member_paths):
                     message = (
                         "The tar file ({}) has a file ({}) trying to install "
                         "outside target directory ({})"
@@ -253,27 +314,46 @@ def unpack_file(
     location: str,
     content_type: Optional[str] = None,
 ) -> None:
+    """Unpack ``filename`` into ``location``.
+
+    Archive format is chosen in order of decreasing reliability:
+    ``content_type``, then filename extension, then magic signature
+    (unambiguous matches only).
+    """
     filename = os.path.realpath(filename)
-    if (
-        content_type == "application/zip"
-        or filename.lower().endswith(ZIP_EXTENSIONS)
-        or zipfile.is_zipfile(filename)
-    ):
-        unzip_file(filename, location, flatten=not filename.endswith(".whl"))
-    elif (
-        content_type == "application/x-gzip"
-        or tarfile.is_tarfile(filename)
-        or filename.lower().endswith(TAR_EXTENSIONS + BZ2_EXTENSIONS + XZ_EXTENSIONS)
-    ):
+    zip_flatten = not filename.endswith(".whl")
+
+    def _unzip() -> None:
+        unzip_file(filename, location, flatten=zip_flatten)
+
+    def _untar() -> None:
         untar_file(filename, location)
-    else:
-        # FIXME: handle?
-        # FIXME: magic signatures?
-        logger.critical(
-            "Cannot unpack file %s (downloaded from %s, content-type: %s); "
-            "cannot detect archive format",
-            filename,
-            location,
-            content_type,
-        )
-        raise InstallationError(f"Cannot determine archive format of {location}")
+
+    if content_type == "application/zip":
+        return _unzip()
+    if content_type == "application/x-gzip":
+        return _untar()
+
+    if filename.lower().endswith(ZIP_EXTENSIONS):
+        return _unzip()
+    if filename.lower().endswith(TAR_EXTENSIONS + BZ2_EXTENSIONS + XZ_EXTENSIONS):
+        return _untar()
+
+    # avoid ambiguous case where both signature checks return True
+    is_zipfile = zipfile.is_zipfile(filename)
+    is_tarfile = tarfile.is_tarfile(filename)
+    if is_zipfile and not is_tarfile:
+        return _unzip()
+    if is_tarfile and not is_zipfile:
+        return _untar()
+    if is_zipfile and is_tarfile:
+        logger.error("Ambiguous file signature in %s.", filename)
+
+    logger.critical(
+        "Cannot unpack file %s (downloaded from %s, content-type: %s); "
+        "cannot detect archive format",
+        filename,
+        location,
+        content_type,
+    )
+    raise InstallationError(f"Cannot determine archive format of {location}")

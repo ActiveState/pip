@@ -9,6 +9,86 @@
 
 .. towncrier release notes start
 
+24.0.post2 (2026-10-21)
+=======================
+
+ActiveState security release for the Python 3.7-compatible pip 24.0 line.
+
+Security Fixes
+--------------
+
+- **CVE-2026-6357**: Run the pip self-version check before the command body
+  and only print its upgrade prompt afterwards. Previously the check ran after
+  ``pip install`` had written wheels, and the vendored ``packaging`` probes
+  ``import _manylinux`` while building the finder, so a just-installed wheel
+  shipping a top-level ``_manylinux.py`` was executed by pip. The check is
+  also skipped when pip itself is being installed. (`GHSA-jp4c-xjxw-mgf9 <https://github.com/advisories/GHSA-jp4c-xjxw-mgf9>`_)
+- **CVE-2026-8643**: Reject ``console_scripts`` and ``gui_scripts`` entry
+  points whose name would install a script outside the scripts directory.
+  The vendored distlib 0.3.8 accepts any non-whitespace name and does no
+  containment check of its own. (`GHSA-wf93-45jw-7689 <https://github.com/advisories/GHSA-wf93-45jw-7689>`_)
+- **CVE-2026-13346**: Stop ``Link.filename`` percent-decoding the URL path a
+  second time, so a doubly-encoded separator from a malicious index (e.g.
+  ``..%252F..%252Fevil.whl``) can no longer write a download outside the
+  download directory. Download file names are now always validated as a
+  single path component. (`GHSA-qwm4-qh6w-59xr <https://github.com/advisories/GHSA-qwm4-qh6w-59xr>`_)
+- **CVE-2026-3219**: Choose the archive format by content type, then file name
+  extension, then an unambiguous magic signature, so a tar+ZIP polyglot is no
+  longer always treated as a ZIP; ambiguous archives are rejected. (`GHSA-58qw-9mgm-455v <https://github.com/advisories/GHSA-58qw-9mgm-455v>`_)
+- **GHSA-6q48-6c7w-9gw2** / **CVE-2024-39689**: Upgrade vendored certifi from
+  2023.7.22 to 2026.10.19 (the release vendored by pip 26.2.2), dropping the
+  emSign ECC Root CA - G3 (compromised intermediate CA keys) and GLOBALTRUST
+  2020 root certificates. (`GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_,
+  `GHSA-248v-346w-9cwc <https://github.com/advisories/GHSA-248v-346w-9cwc>`_)
+- **CVE-2025-8869** (hardening): Harden the tar extraction fix shipped in
+  ``24.0.0.1`` (pypa/pip#14127). That fix only checked that a symlink's target
+  is another archive member, and ``.`` / ``..`` can be members, so an archive
+  could still write outside the extract directory through a symlink to ``..``
+  or a chain of in-bounds symlinks. Each member is now also checked after
+  resolving symlinks, and a symlink whose target resolves outside the
+  destination is rejected before anything is written through it. pip 24.0
+  always uses this extraction path. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
+
+Bug Fixes
+---------
+
+- ``is_within_directory`` no longer uses ``os.path.commonpath`` (introduced by
+  the CVE-2026-1703 fix in ``24.0.0.1``), which dropped a POSIX ``//`` prefix,
+  so ``pip install --prefix //path ...`` failed with "trying to install outside
+  the target directory". It now compares on a path-component boundary, and a
+  target on another Windows drive is rejected without raising.
+- A ``console_scripts`` / ``gui_scripts`` scripts directory at a filesystem
+  root (``/`` or ``C:\``) no longer rejects every entry point.
+- Symlinks in an sdist are accepted when the archive uses ``./``-prefixed member
+  names (as made by ``tar -C dir .``) or point to a directory that has no entry
+  of its own. Upstream pip still refuses these; containment is enforced by the
+  checks above.
+- An error or Ctrl-C while the pip version check fetches (before the command
+  runs) is reported by pip's usual error handling instead of a raw traceback.
+  A malformed requirement such as ``"foo @ http://[bad/x"`` no longer crashes
+  the ``pip install pip`` detection.
+- A download whose name resolves to ``.`` or ``..`` (for example from a
+  ``Content-Disposition`` header) is reported as
+  ``ERROR: Unexpected file name derived from URL`` instead of a traceback. The
+  write was already blocked.
+
+.. note::
+
+   Patched in the earlier ActiveState build ``24.0.0.1`` (2026-05-13), which
+   kept the internal version ``24.0``: **CVE-2025-8869** (tar fallback symlink
+   targets, `GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
+   and **CVE-2026-1703** (``is_within_directory`` component boundary,
+   `GHSA-6vgw-5pg2-w6jp <https://github.com/advisories/GHSA-6vgw-5pg2-w6jp>`_).
+   CVE-2022-23491 (TrustCor) and CVE-2023-37920 (E-Tugra) were already fixed by
+   the certifi 2023.7.22 bundle in upstream 24.0.
+
+   This release uses the PEP 440 post-release scheme. ``24.0.0.1`` counts as
+   ActiveState release 1 on this line, so this one is ``24.0.post2``. That
+   keeps its 4-component form for the CVE override table (``24.0.0.2``) from
+   colliding with ``24.0.0.1``. ``24.0.post2`` sorts after ``24.0``, which is
+   the version the 24.0.0.1 build reports.
+
+
 24.0 (2024-02-03)
 =================
 
