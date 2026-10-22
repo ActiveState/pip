@@ -15,6 +15,7 @@ from typing import (
     Union,
 )
 
+from pip._internal.exceptions import UnsafeFilenameError
 from pip._internal.utils.filetypes import WHEEL_EXTENSION
 from pip._internal.utils.hashes import Hashes
 from pip._internal.utils.misc import (
@@ -58,7 +59,7 @@ def as_path_component(name: str) -> PathComponent:
     """
     component = _to_path_component(name)
     if not component:
-        raise ValueError(f"Unexpected file name derived from URL: {name!r}")
+        raise UnsafeFilenameError(f"Unexpected file name derived from URL: {name!r}")
 
     return component
 
@@ -72,7 +73,7 @@ def join_within_directory(directory: str, component: PathComponent) -> str:
     checked at runtime here.
     """
     if not component or component != _to_path_component(component):
-        raise ValueError(f"Not a single path component: {component!r}")
+        raise UnsafeFilenameError(f"Not a single path component: {component!r}")
 
     return os.path.join(directory, component)
 

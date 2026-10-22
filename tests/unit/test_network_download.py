@@ -4,6 +4,7 @@ from typing import Dict
 
 import pytest
 
+from pip._internal.exceptions import InstallationError
 from pip._internal.models.link import Link
 from pip._internal.network.download import (
     _get_http_response_filename,
@@ -155,5 +156,7 @@ def test_get_http_response_filename_rejects_parent_reference(
     resp = MockResponse(b"")
     resp.url = url
     resp.headers["content-disposition"] = content_disposition
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as exc_info:
         _get_http_response_filename(resp, Link(url))
+    # Reported by pip's command loop as "ERROR: ...", not a traceback.
+    assert isinstance(exc_info.value, InstallationError)

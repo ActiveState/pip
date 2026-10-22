@@ -4,6 +4,7 @@ from typing import Optional
 
 import pytest
 
+from pip._internal.exceptions import InstallationError
 from pip._internal.models.link import (
     Link,
     as_path_component,
@@ -331,3 +332,15 @@ def test_join_within_directory_rejects_non_component(component: str) -> None:
     # its argument at runtime instead of trusting the caller.
     with pytest.raises(ValueError):
         join_within_directory("downloads", component)  # type: ignore[arg-type]
+
+
+def test_unsafe_file_name_is_reported_as_installation_error() -> None:
+    # The rejection stays a ValueError for existing callers, but pip's command
+    # loop reports it as a normal "ERROR: ..." line instead of a traceback.
+    for call in (
+        lambda: as_path_component(".."),
+        lambda: join_within_directory("downloads", ".."),  # type: ignore[arg-type]
+    ):
+        with pytest.raises(InstallationError) as exc_info:
+            call()
+        assert isinstance(exc_info.value, ValueError)
