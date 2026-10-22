@@ -4,6 +4,7 @@ from typing import Optional
 
 import pytest
 
+from pip._internal.exceptions import InstallationError, UnsafeFilenameError
 from pip._internal.models.link import (
     Link,
     as_path_component,
@@ -361,3 +362,16 @@ def test_join_within_directory_rejects_non_component(component: str) -> None:
     # itself instead of trusting the caller.
     with pytest.raises(ValueError):
         join_within_directory("downloads", component)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("name", ["", ".", ".."])
+def test_unsafe_filename_is_an_installation_error(name: str) -> None:
+    # Reported by pip's command loop as "ERROR: ..." instead of a traceback,
+    # while staying a ValueError for existing callers.
+    with pytest.raises(InstallationError) as exc_info:
+        as_path_component(name)
+    assert isinstance(exc_info.value, UnsafeFilenameError)
+    assert isinstance(exc_info.value, ValueError)
+
+    with pytest.raises(InstallationError):
+        join_within_directory("downloads", name)  # type: ignore[arg-type]
