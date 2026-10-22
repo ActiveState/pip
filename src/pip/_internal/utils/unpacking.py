@@ -93,8 +93,13 @@ def is_within_directory(
         abs_directory = os.path.abspath(directory)
         abs_target = os.path.abspath(target)
 
-    prefix = os.path.commonpath([abs_directory, abs_target])
-    return prefix == abs_directory
+    if abs_target == abs_directory:
+        return True
+    # A filesystem root ("/" or "C:\\") already ends with a separator; appending
+    # another would reject everything. abspath keeps a POSIX "//" prefix, which
+    # os.path.commonpath would drop.
+    prefix = abs_directory if abs_directory.endswith(os.sep) else abs_directory + os.sep
+    return abs_target.startswith(prefix)
 
 
 def _get_default_mode_plus_executable() -> int:

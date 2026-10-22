@@ -724,6 +724,15 @@ def test_script_within_dir_allows_doubled_slash_root() -> None:
     assert wheel._script_within_dir("../outside", "//srv/env/bin") is False
 
 
+@pytest.mark.skipif(WINDOWS, reason="POSIX filesystem root")
+def test_script_within_dir_filesystem_root() -> None:
+    # A scripts directory at the filesystem root accepts ordinary scripts...
+    assert wheel._script_within_dir("pip", "/") is True
+    # ...but never the directory itself.
+    assert wheel._script_within_dir(".", "/") is False
+    assert wheel._script_within_dir("", "/") is False
+
+
 @pytest.mark.skipif(not WINDOWS, reason="drive letters only matter on Windows")
 def test_script_within_dir_rejects_other_drive() -> None:
     # Validate that a script on a different drive is rejected,
