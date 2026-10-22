@@ -240,9 +240,11 @@ class Command(CommandContextMixIn):
 
         # The version check does its lookups before the command body runs and
         # only reports afterwards, so nothing is imported once packages have
-        # been installed (CVE-2026-6357).
-        version_check = self._pip_version_check_fetch(options, args)
+        # been installed (CVE-2026-6357). The fetch runs inside the try so
+        # its errors (and Ctrl-C) get pip's normal error handling.
+        version_check = None
         try:
+            version_check = self._pip_version_check_fetch(options, args)
             status = self.run(options, args)
             assert isinstance(status, int)
             return status

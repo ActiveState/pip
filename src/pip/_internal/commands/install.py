@@ -66,7 +66,9 @@ def _arg_refers_to_pip(arg):
     # type: (str) -> bool
     try:
         req = Requirement(arg)
-    except InvalidRequirement:
+    except (InvalidRequirement, ValueError):
+        # A malformed requirement (e.g. a URL that urlparse rejects with
+        # ValueError) is not pip; leave the error to the normal parsing path.
         return False
     return canonicalize_name(req.name) == "pip"
 

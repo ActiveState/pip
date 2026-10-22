@@ -198,6 +198,8 @@ def test_index_group_version_check_disabled(
     ('six', False),
     ('./pip-20.3.4-py2.py3-none-any.whl', False),
     ('-r', False),
+    # urlparse raises ValueError for this URL; it is simply not pip.
+    ('foo @ http://[bad/x', False),
 ])
 def test_arg_refers_to_pip(arg, expected):
     assert _arg_refers_to_pip(arg) is expected

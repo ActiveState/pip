@@ -122,6 +122,38 @@ def test_version_check_fetch_before_run_emit_after(monkeypatch):
     assert events == ['fetch', 'run', ('emit', 'fetched')]
 
 
+@pytest.mark.parametrize('exc, message', [
+    (KeyboardInterrupt, 'Operation cancelled by user'),
+    (ValueError, 'Exception:'),
+])
+def test_version_check_fetch_errors_are_handled(
+    monkeypatch, capsys, exc, message
+):
+    """
+    The pre-command version-check fetch runs inside _main()'s error
+    handling, so Ctrl-C or an unexpected error during it is reported by pip
+    instead of escaping as a raw traceback.
+    """
+    emitted = []
+
+    def fetch(self, options, args):
+        raise exc()
+
+    def emit(self, options, fetched):
+        emitted.append(fetched)
+
+    monkeypatch.setattr(Command, '_pip_version_check_fetch', fetch)
+    monkeypatch.setattr(Command, '_pip_version_check_emit', emit)
+
+    cmd = FakeCommand(run_func=lambda: pytest.fail('run() must not be called'))
+    status = cmd.main([])
+    assert status != SUCCESS
+    stderr = capsys.readouterr().err
+    assert message in stderr
+    # The emit step still runs (with nothing fetched).
+    assert emitted == [None]
+
+
 def test_log_command_success(fixed_time, tmpdir):
     """Test the --log option logs when command succeeds."""
     cmd = FakeCommand()
