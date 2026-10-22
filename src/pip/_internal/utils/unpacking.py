@@ -207,7 +207,13 @@ def untar_file(filename: str, location: str) -> None:
             if leading:
                 fn = split_leading_dir(fn)[1]
             path = os.path.join(location, fn)
-            if not is_within_directory(location, path):
+
+            # The plain check rejects textual ".." escapes; resolving symlinks also
+            # catches a later member redirected outside by an earlier member's
+            # symlink (e.g. "link/../file").
+            if not is_within_directory(location, path) or not is_within_directory(
+                location, path, resolve_symlinks=True
+            ):
                 message = (
                     "The tar file ({}) has a file ({}) trying to install "
                     "outside target directory ({})"
@@ -216,6 +222,17 @@ def untar_file(filename: str, location: str) -> None:
             if member.isdir():
                 ensure_dir(path)
             elif member.issym():
+                # Reject symlinks resolving outside the destination, so a later
+                # member cannot be written through them.
+                target = os.path.join(os.path.dirname(path), member.linkname)
+                if not is_within_directory(location, target, resolve_symlinks=True):
+                    message = (
+                        "The tar file ({}) has a file ({}) trying to install "
+                        "outside target directory ({})"
+                    )
+                    raise InstallationError(
+                        message.format(filename, member.name, member.linkname)
+                    )
                 if not is_symlink_target_in_tar(tar, member):
                     message = (
                         "The tar file ({}) has a file ({}) trying to install "
