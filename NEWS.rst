@@ -40,8 +40,39 @@ Security Fixes
   emSign ECC Root CA - G3 (compromised intermediate CA keys) and GLOBALTRUST
   2020 root certificates. (`GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_,
   `GHSA-248v-346w-9cwc <https://github.com/advisories/GHSA-248v-346w-9cwc>`_)
+- **CVE-2025-8869** (hardening): Harden the tar extraction fix shipped in
+  ``24.0.0.1`` (pypa/pip#14127). That fix only checked that a symlink's target
+  is another archive member, and ``.`` / ``..`` can be members, so an archive
+  could still write outside the extract directory through a symlink to ``..``
+  or a chain of in-bounds symlinks. Each member is now also checked after
+  resolving symlinks, and a symlink whose target resolves outside the
+  destination is rejected before anything is written through it. pip 24.0
+  always uses this extraction path. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
 
-.. note
+Bug Fixes
+---------
+
+- ``is_within_directory`` no longer uses ``os.path.commonpath`` (introduced by
+  the CVE-2026-1703 fix in ``24.0.0.1``), which dropped a POSIX ``//`` prefix,
+  so ``pip install --prefix //path ...`` failed with "trying to install outside
+  the target directory". It now compares on a path-component boundary, and a
+  target on another Windows drive is rejected without raising.
+- A ``console_scripts`` / ``gui_scripts`` scripts directory at a filesystem
+  root (``/`` or ``C:\``) no longer rejects every entry point.
+- Symlinks in an sdist are accepted when the archive uses ``./``-prefixed member
+  names (as made by ``tar -C dir .``) or point to a directory that has no entry
+  of its own. Upstream pip still refuses these; containment is enforced by the
+  checks above.
+- An error or Ctrl-C while the pip version check fetches (before the command
+  runs) is reported by pip's usual error handling instead of a raw traceback.
+  A malformed requirement such as ``"foo @ http://[bad/x"`` no longer crashes
+  the ``pip install pip`` detection.
+- A download whose name resolves to ``.`` or ``..`` (for example from a
+  ``Content-Disposition`` header) is reported as
+  ``ERROR: Unexpected file name derived from URL`` instead of a traceback. The
+  write was already blocked.
+
+.. note::
 
    Patched in the earlier ActiveState build ``24.0.0.1`` (2026-05-13), which
    kept the internal version ``24.0``: **CVE-2025-8869** (tar fallback symlink
