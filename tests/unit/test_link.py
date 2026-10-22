@@ -5,7 +5,12 @@ import posixpath
 
 import pytest
 
-from pip._internal.exceptions import InvalidEggFragment, PipError
+from pip._internal.exceptions import (
+    InstallationError,
+    InvalidEggFragment,
+    PipError,
+    UnsafeFilenameError,
+)
 from pip._internal.models.link import (
     Link,
     as_path_component,
@@ -338,6 +343,15 @@ def test_as_path_component_reduces_to_basename(name: str) -> None:
 def test_as_path_component_rejects_empty_or_parent_reference(name: str) -> None:
     with pytest.raises(ValueError):
         as_path_component(name)
+
+
+def test_as_path_component_error_is_installation_error() -> None:
+    # Still a ValueError for existing callers, but pip's command loop reports
+    # an InstallationError as a plain "ERROR:" line rather than a traceback.
+    with pytest.raises(UnsafeFilenameError) as exc_info:
+        as_path_component("..")
+    assert isinstance(exc_info.value, InstallationError)
+    assert isinstance(exc_info.value, ValueError)
 
 
 @pytest.mark.parametrize(

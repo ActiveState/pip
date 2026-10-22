@@ -192,6 +192,10 @@ class InstallationError(PipError):
     """General exception during installation"""
 
 
+class UnsafeFilenameError(InstallationError, ValueError):
+    """A file name derived from a URL or header is not a single safe path component."""
+
+
 class FailedToPrepareCandidate(InstallationError):
     """Raised when we fail to prepare a candidate (i.e. fetch and generate metadata).
 

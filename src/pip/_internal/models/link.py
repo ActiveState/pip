@@ -17,7 +17,7 @@ from typing import (
     NewType,
 )
 
-from pip._internal.exceptions import InvalidEggFragment
+from pip._internal.exceptions import InvalidEggFragment, UnsafeFilenameError
 from pip._internal.utils.datetime import parse_iso_datetime
 from pip._internal.utils.filetypes import WHEEL_EXTENSION
 from pip._internal.utils.hashes import Hashes
@@ -59,7 +59,7 @@ def as_path_component(name: str) -> PathComponent:
     """
     component = _to_path_component(name)
     if not component:
-        raise ValueError(f"Unexpected file name derived from URL: {name!r}")
+        raise UnsafeFilenameError(f"Unexpected file name derived from URL: {name!r}")
 
     return component
 
