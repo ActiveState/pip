@@ -84,13 +84,21 @@ def has_leading_dir(paths):
     return True
 
 
-def is_within_directory(directory, target):
-    # type: ((Union[str, Text]), (Union[str, Text])) -> bool
+def is_within_directory(directory, target, resolve_symlinks=False):
+    # type: ((Union[str, Text]), (Union[str, Text]), bool) -> bool
     """
     Return true if the absolute path of target is within the directory
+    (including when target is equal to the directory).
+
+    When ``resolve_symlinks`` is true, resolve symlinks before comparing so
+    traversal through a symlink (e.g. "link/../file") is also caught.
     """
-    abs_directory = os.path.abspath(directory)
-    abs_target = os.path.abspath(target)
+    if resolve_symlinks:
+        abs_directory = os.path.realpath(directory)
+        abs_target = os.path.realpath(target)
+    else:
+        abs_directory = os.path.abspath(directory)
+        abs_target = os.path.abspath(target)
 
     # NOTE: os.path.commonprefix compares character-by-character, so it treats
     #       "/a/parent" and "/a/parentfoo" as sharing the prefix "/a/parent"
@@ -220,7 +228,12 @@ def untar_file(filename, location):
                 # https://github.com/python/mypy/issues/1174
                 fn = split_leading_dir(fn)[1]  # type: ignore
             path = os.path.join(location, fn)
-            if not is_within_directory(location, path):
+            # The plain check rejects textual ".." escapes; resolving symlinks
+            # also catches a later member redirected outside by an earlier
+            # member's symlink (e.g. "link/../file").
+            if not is_within_directory(location, path) or (
+                not is_within_directory(location, path, resolve_symlinks=True)
+            ):
                 message = (
                     'The tar file ({}) has a file ({}) trying to install '
                     'outside target directory ({})'
@@ -231,6 +244,21 @@ def untar_file(filename, location):
             if member.isdir():
                 ensure_dir(path)
             elif member.issym():
+                # Reject symlinks resolving outside the destination, so a
+                # later member cannot be written through them.
+                link_target = os.path.join(
+                    os.path.dirname(path), member.linkname
+                )
+                if not is_within_directory(
+                    location, link_target, resolve_symlinks=True
+                ):
+                    message = (
+                        'The tar file ({}) has a link ({}) trying to point '
+                        'outside target directory ({})'
+                    )
+                    raise InstallationError(
+                        message.format(filename, member.name, member.linkname)
+                    )
                 if not is_symlink_target_in_tar(tar, member):
                     message = (
                         'The tar file ({}) has a link ({}) trying to point '

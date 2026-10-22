@@ -209,6 +209,71 @@ class TestUnpackArchives(object):
         assert os.path.islink(link_path)
         assert os.readlink(link_path) == 'target.txt'
 
+    def test_unpack_tar_symlink_then_member(self):
+        """Reject a symlink to outside before a member is written through it.
+
+        CVE-2025-8869 follow-up (pypa/pip#14127). Python 2.7 has no
+        ``tarfile.data_filter``, so this check is the only protection.
+        """
+        tar_filepath = os.path.join(self.tempdir, 'symlink_then_member.tar')
+        extract_path = os.path.join(self.tempdir, 'extract_path')
+        outside_path = os.path.join(self.tempdir, 'outside.txt')
+
+        with tarfile.open(tar_filepath, 'w') as tar:
+            info = tarfile.TarInfo('outside_link')
+            info.type = tarfile.SYMTYPE
+            info.linkname = '..'
+            tar.addfile(info)
+
+            data = b'data\n'
+            info = tarfile.TarInfo('outside_link/outside.txt')
+            info.size = len(data)
+            tar.addfile(info, fileobj=io.BytesIO(data))
+
+            info = tarfile.TarInfo('..')
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
+        assert not os.path.exists(outside_path)
+        assert not os.path.exists(os.path.join(extract_path, 'outside_link'))
+
+    def test_unpack_tar_nested_symlink_traversal(self):
+        """Reject a member that escapes through a chain of in-bounds symlinks.
+
+        CVE-2025-8869 follow-up (pypa/pip#14127).
+        """
+        tar_filepath = os.path.join(self.tempdir, 'nested_traversal.tar')
+        extract_path = os.path.join(self.tempdir, 'extract_path')
+        outside_path = os.path.join(self.tempdir, 'outside.txt')
+
+        with tarfile.open(tar_filepath, 'w') as tar:
+            info = tarfile.TarInfo('.')
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+
+            info = tarfile.TarInfo('redir')
+            info.type = tarfile.SYMTYPE
+            info.linkname = '.'
+            tar.addfile(info)
+
+            info = tarfile.TarInfo('redir/up')
+            info.type = tarfile.SYMTYPE
+            info.linkname = '..'
+            tar.addfile(info)
+
+            data = b'data\n'
+            info = tarfile.TarInfo('redir/up/outside.txt')
+            info.size = len(data)
+            tar.addfile(info, fileobj=io.BytesIO(data))
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
+        assert not os.path.exists(outside_path)
+
 
 @pytest.mark.parametrize('args, expected', [
     # Test the second containing the first.
