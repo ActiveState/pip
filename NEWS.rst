@@ -33,15 +33,21 @@ Security Fixes
 - **CVE-2026-3219**: Disambiguate archive type detection in ``unpack_file`` so a
   tar+zip polyglot is no longer always treated as a zip; ambiguous archives are
   rejected. (`GHSA-58qw-9mgm-455v <https://github.com/advisories/GHSA-58qw-9mgm-455v>`_)
-- **CVE-2026-1703**: Use ``os.path.commonpath`` in ``is_within_directory``
-  (instead of a character-prefix comparison) so an extracted file cannot land in
-  a sibling directory whose name is a prefix of the install path. (`GHSA-6vgw-5pg2-w6jp <https://github.com/advisories/GHSA-6vgw-5pg2-w6jp>`_)
+- **CVE-2026-1703**: Compare paths on a component boundary in
+  ``is_within_directory`` (instead of a character-prefix comparison) so an
+  extracted file cannot land in a sibling directory whose name is a prefix of
+  the install path. (`GHSA-6vgw-5pg2-w6jp <https://github.com/advisories/GHSA-6vgw-5pg2-w6jp>`_)
 - **CVE-2025-8869**: Validate that tar symlink members point to other members
-  inside the same archive before extraction. Python 3.6 has no
-  ``tarfile.data_filter``, so this is the only protection on this release. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
-- **CVE-2023-5752**: Pass a Mercurial revision as a single ``-r=<rev>`` token so
-  a malicious revision cannot inject ``hg`` command-line options (e.g.
-  ``--config``). (`GHSA-mq26-g339-26xf <https://github.com/advisories/GHSA-mq26-g339-26xf>`_)
+  inside the same archive before extraction, and harden the fix as upstream
+  did in pypa/pip#14127: every member and every symlink target is also checked
+  with symlinks resolved, so a chain such as ``link -> ..`` followed by
+  ``link/file`` (or ``redir -> .``, ``redir/up -> ..``) can no longer write
+  outside the extract directory. Python 3.6 has no ``tarfile.data_filter``, so
+  this is the only protection on this release. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
+- **CVE-2023-5752**: Pass a Mercurial revision as a single ``--rev=<rev>``
+  token so a malicious revision cannot inject ``hg`` command-line options (e.g.
+  ``--config``). The long form is used because ``hg`` rejects ``-r=<rev>``
+  (pypa/pip#12373). (`GHSA-mq26-g339-26xf <https://github.com/advisories/GHSA-mq26-g339-26xf>`_)
 - **CVE-2022-23491** / **CVE-2023-37920** / **CVE-2024-39689** /
   **GHSA-6q48-6c7w-9gw2**: Upgrade vendored certifi from 2021.05.30 to
   2026.10.19.post1 (ActiveState's build of certifi 2026.10.19, the release
@@ -52,7 +58,24 @@ Security Fixes
   `GHSA-248v-346w-9cwc <https://github.com/advisories/GHSA-248v-346w-9cwc>`_,
   `GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_)
 
-.. note
+Bug Fixes
+---------
+
+- Path containment checks (``is_within_directory`` and the entry point
+  scripts-directory check) are root-safe: installing under a POSIX ``//``
+  prefix works again, a scripts directory at a filesystem root (``/`` or
+  ``C:\``) no longer rejects every entry point, and a target on another
+  Windows drive is refused without a traceback.
+- The pre-command pip version check runs inside pip's error handling, so a
+  malformed requirement or Ctrl-C during the check is reported like any other
+  command error.
+- Tar symlinks are matched against normalized member names (and implied parent
+  directories), so ``./``-prefixed archives and links to a directory without
+  its own entry unpack again.
+- A download whose file name is not a single safe path component is reported
+  as a normal ``ERROR:`` line instead of a traceback.
+
+.. note::
 
    This release uses the PEP 440 post-release scheme (``21.3.1.postN``).
 
