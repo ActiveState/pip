@@ -184,3 +184,25 @@ def test_list_pip_version_check(version_check_mock: mock.Mock, flag: str) -> Non
         version_check_mock.assert_called_once()
     else:
         version_check_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ValueError("Invalid IPv6 URL")],
+)
+def test_arg_refers_to_pip_tolerates_value_error(exc: Exception) -> None:
+    """A malformed requirement must not crash the pre-command version check."""
+    from pip._internal.commands import install
+
+    with mock.patch.object(install, "Requirement", side_effect=exc):
+        assert install._arg_refers_to_pip("foo @ http://[bad/x") is False
+
+
+@pytest.mark.parametrize(
+    "arg, expected",
+    [("pip", True), ("pip==26.0.1", True), ("Pip", True), ("six", False)],
+)
+def test_arg_refers_to_pip(arg: str, expected: bool) -> None:
+    from pip._internal.commands import install
+
+    assert install._arg_refers_to_pip(arg) is expected

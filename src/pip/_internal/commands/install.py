@@ -69,7 +69,9 @@ logger = getLogger(__name__)
 def _arg_refers_to_pip(arg: str) -> bool:
     try:
         req = Requirement(arg)
-    except InvalidRequirement:
+    except (InvalidRequirement, ValueError):
+        # Older packaging can surface a bare ValueError (e.g. from urlsplit on
+        # "foo @ http://[bad"); let pip's normal requirement parsing report it.
         return False
     return canonicalize_name(req.name) == "pip"
 
