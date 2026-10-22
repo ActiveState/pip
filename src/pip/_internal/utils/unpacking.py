@@ -74,12 +74,21 @@ def has_leading_dir(paths: Iterable[str]) -> bool:
     return True
 
 
-def is_within_directory(directory: str, target: str) -> bool:
+def is_within_directory(
+    directory: str, target: str, *, resolve_symlinks: bool = False
+) -> bool:
     """
     Return true if the absolute path of target is within the directory
+
+    When ``resolve_symlinks`` is true, resolve symlinks before comparing so
+    traversal through a symlink (e.g. "link/../file") is also caught.
     """
-    abs_directory = os.path.abspath(directory)
-    abs_target = os.path.abspath(target)
+    if resolve_symlinks:
+        abs_directory = os.path.realpath(directory)
+        abs_target = os.path.realpath(target)
+    else:
+        abs_directory = os.path.abspath(directory)
+        abs_target = os.path.abspath(target)
 
     # os.path.commonprefix compares character-by-character, so it treated
     # "/a/parentfoo" as within "/a/parent" (CVE-2026-1703); commonpath
@@ -195,7 +204,12 @@ def untar_file(filename: str, location: str) -> None:
             if leading:
                 fn = split_leading_dir(fn)[1]
             path = os.path.join(location, fn)
-            if not is_within_directory(location, path):
+            # The plain check rejects textual ".." escapes; resolving symlinks
+            # also catches a later member redirected outside by an earlier
+            # member's symlink (e.g. "link/../file").
+            if not is_within_directory(location, path) or not is_within_directory(
+                location, path, resolve_symlinks=True
+            ):
                 message = (
                     "The tar file ({}) has a file ({}) trying to install "
                     "outside target directory ({})"
@@ -204,6 +218,17 @@ def untar_file(filename: str, location: str) -> None:
             if member.isdir():
                 ensure_dir(path)
             elif member.issym():
+                # Reject symlinks resolving outside the destination, so a
+                # later member cannot be written through them.
+                target = os.path.join(os.path.dirname(path), member.linkname)
+                if not is_within_directory(location, target, resolve_symlinks=True):
+                    message = (
+                        "The tar file ({}) has a file ({}) trying to install "
+                        "outside target directory ({})"
+                    )
+                    raise InstallationError(
+                        message.format(filename, member.name, member.linkname)
+                    )
                 # CVE-2025-8869: a symlink must point at another member of the
                 # same archive, or later writes through it could land anywhere
                 # on the host. Python 3.6 has no tarfile.data_filter (PEP 706),
