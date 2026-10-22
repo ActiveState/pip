@@ -5,6 +5,7 @@ from __future__ import absolute_import
 
 import logging
 import os
+import posixpath
 import shutil
 import stat
 import tarfile
@@ -21,7 +22,7 @@ from pip._internal.utils.misc import ensure_dir
 from pip._internal.utils.typing import MYPY_CHECK_RUNNING
 
 if MYPY_CHECK_RUNNING:
-    from typing import Iterable, List, Optional, Text, Union
+    from typing import Iterable, List, Optional, Set, Text, Union
     from zipfile import ZipInfo
 
 
@@ -117,23 +118,35 @@ def is_within_directory(directory, target, resolve_symlinks=False):
     return abs_target.startswith(prefix)
 
 
-def is_symlink_target_in_tar(tar, tarinfo):
-    # type: (tarfile.TarFile, tarfile.TarInfo) -> bool
+def _tar_member_paths(tar):
+    # type: (tarfile.TarFile) -> Set[str]
+    """Normalized member paths plus every implied parent directory."""
+    paths = set()  # type: Set[str]
+    for member in tar.getmembers():
+        name = posixpath.normpath(member.name.replace("\\", "/"))
+        while name not in ("", ".", "/"):
+            paths.add(name)
+            name = posixpath.dirname(name)
+    return paths
+
+
+def is_symlink_target_in_tar(tar, tarinfo, member_paths=None):
+    # type: (tarfile.TarFile, tarfile.TarInfo, Optional[Set[str]]) -> bool
     """
     Return true if the file the symlink member points to is itself a member
     of the same tar archive, i.e. the symlink does not escape the archive to
     reference an arbitrary path on the host filesystem (CVE-2025-8869).
+
+    Member names are compared after normalization, and directories implied
+    by a member's path count as members, so "./"-prefixed archives and links
+    to a directory without its own entry are accepted. Containment itself is
+    enforced by the realpath checks in untar_file().
     """
     linkname = os.path.join(os.path.dirname(tarinfo.name), tarinfo.linkname)
-
-    linkname = os.path.normpath(linkname)
-    linkname = linkname.replace("\\", "/")
-
-    try:
-        tar.getmember(linkname)
-        return True
-    except KeyError:
-        return False
+    linkname = posixpath.normpath(linkname.replace("\\", "/"))
+    if member_paths is None:
+        member_paths = _tar_member_paths(tar)
+    return linkname in member_paths
 
 
 def set_extracted_file_to_default_mode_plus_executable(path):
@@ -229,6 +242,9 @@ def untar_file(filename, location):
         leading = has_leading_dir([
             member.name for member in tar.getmembers()
         ])
+        # Computed once: is_symlink_target_in_tar() would otherwise rebuild
+        # it for every symlink member.
+        member_paths = _tar_member_paths(tar)
         for member in tar.getmembers():
             fn = member.name
             if leading:
@@ -266,7 +282,7 @@ def untar_file(filename, location):
                     raise InstallationError(
                         message.format(filename, member.name, member.linkname)
                     )
-                if not is_symlink_target_in_tar(tar, member):
+                if not is_symlink_target_in_tar(tar, member, member_paths):
                     message = (
                         'The tar file ({}) has a link ({}) trying to point '
                         'outside target directory ({})'

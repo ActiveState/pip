@@ -209,6 +209,57 @@ class TestUnpackArchives(object):
         assert os.path.islink(link_path)
         assert os.readlink(link_path) == 'target.txt'
 
+    def _make_tar(self, name, entries):
+        path = os.path.join(self.tempdir, name)
+        with tarfile.open(path, 'w') as tar:
+            for member_name, kind, arg in entries:
+                info = tarfile.TarInfo(member_name)
+                if kind == 'dir':
+                    info.type = tarfile.DIRTYPE
+                    tar.addfile(info)
+                elif kind == 'sym':
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = arg
+                    tar.addfile(info)
+                else:
+                    info.size = len(arg)
+                    tar.addfile(info, io.BytesIO(arg))
+        return path
+
+    def test_unpack_tar_dot_prefixed_symlink_success(self):
+        """A "./"-prefixed archive (``tar -C dir .``) with an in-archive
+        symlink is accepted: member names are compared normalized."""
+        test_tar = self._make_tar('dot_prefixed.tar', [
+            ('./', 'dir', None),
+            ('./pkg', 'dir', None),
+            ('./pkg/target.txt', 'file', b'data\n'),
+            ('./pkg/link', 'sym', 'target.txt'),
+        ])
+        out = os.path.join(self.tempdir, 'out')
+        untar_file(test_tar, out)
+        assert os.readlink(os.path.join(out, 'pkg', 'link')) == 'target.txt'
+
+    def test_unpack_tar_symlink_to_implied_dir_success(self):
+        """A symlink to a directory that has no entry of its own (only files
+        beneath it) is accepted: implied parent directories count."""
+        test_tar = self._make_tar('implied_dir.tar', [
+            ('pkg/sub/f.txt', 'file', b'data\n'),
+            ('pkg/link', 'sym', 'sub'),
+        ])
+        out = os.path.join(self.tempdir, 'out')
+        untar_file(test_tar, out)
+        assert os.readlink(os.path.join(out, 'link')) == 'sub'
+
+    def test_unpack_tar_symlink_to_non_member_failure(self):
+        """A symlink to a name that is not in the archive is still refused."""
+        test_tar = self._make_tar('dangling.tar', [
+            ('pkg/a.txt', 'file', b'data\n'),
+            ('pkg/link', 'sym', 'missing.txt'),
+        ])
+        with pytest.raises(InstallationError) as e:
+            untar_file(test_tar, os.path.join(self.tempdir, 'out'))
+        assert 'trying to point outside target directory' in str(e.value)
+
     def test_unpack_tar_symlink_then_member(self):
         """Reject a symlink to outside before a member is written through it.
 
