@@ -18,6 +18,7 @@ from _pytest.monkeypatch import MonkeyPatch
 from pip._internal.exceptions import InstallationError
 from pip._internal.utils.unpacking import (
     _tar_member_paths,
+    is_symlink_target_in_tar,
     is_within_directory,
     unpack_file,
     untar_file,
@@ -813,3 +814,45 @@ def test_polyglot_ambiguous_name_rejected(tmp_path: Path) -> None:
     _write_polyglot(archive)
     with pytest.raises(InstallationError):
         unpack_file(str(archive), str(tmp_path / "out"))
+
+
+def _root_link_tar(explicit_root: bool) -> tarfile.TarFile:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        names = (["./"] if explicit_root else []) + ["./sub/"]
+        for name in names:
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+        link = tarfile.TarInfo("./sub/root")
+        link.type = tarfile.SYMTYPE
+        link.linkname = ".."
+        tar.addfile(link)
+    buf.seek(0)
+    return tarfile.open(fileobj=buf)
+
+
+def test_symlink_to_explicit_archive_root_is_in_tar() -> None:
+    """A "tar -C dir ." archive with "./sub/root -> .." keeps unpacking."""
+    tar = _root_link_tar(explicit_root=True)
+    try:
+        paths = _tar_member_paths(tar)
+        assert "." in paths
+        assert is_symlink_target_in_tar(
+            tar, tar.getmember("./sub/root"), member_paths=paths
+        )
+    finally:
+        tar.close()
+
+
+def test_symlink_to_implicit_archive_root_is_not_in_tar() -> None:
+    """Without an explicit "." member the root is not added (as upstream)."""
+    tar = _root_link_tar(explicit_root=False)
+    try:
+        paths = _tar_member_paths(tar)
+        assert "." not in paths
+        assert not is_symlink_target_in_tar(
+            tar, tar.getmember("./sub/root"), member_paths=paths
+        )
+    finally:
+        tar.close()
