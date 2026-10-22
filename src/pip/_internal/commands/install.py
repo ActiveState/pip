@@ -63,7 +63,10 @@ def get_check_binary_allowed(format_control: FormatControl) -> BinaryAllowedPred
 def _arg_refers_to_pip(arg: str) -> bool:
     try:
         req = Requirement(arg)
-    except InvalidRequirement:
+    except (InvalidRequirement, ValueError):
+        # The vendored packaging can raise a bare ValueError from URL parsing
+        # (e.g. "foo @ http://[bad/x"); leave it to the normal requirement
+        # parser to report.
         return False
     return canonicalize_name(req.name) == "pip"
 

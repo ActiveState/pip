@@ -6,6 +6,7 @@ from pip._vendor.packaging.requirements import Requirement
 
 from pip._internal.commands import install
 from pip._internal.commands.install import (
+    _arg_refers_to_pip,
     create_os_error_message,
     decide_user_install,
     reject_location_related_install_options,
@@ -158,3 +159,20 @@ def test_create_os_error_message(
     monkeypatch.setattr(install, "running_under_virtualenv", lambda: False)
     msg = create_os_error_message(error, show_traceback, using_user_site)
     assert msg == expected
+
+
+@pytest.mark.parametrize(
+    "arg, expected",
+    [
+        ("pip", True),
+        ("PIP>=21", True),
+        ("pip @ https://example.com/pip.whl", True),
+        ("six", False),
+        ("not a requirement!!", False),
+        # urlparse raises a bare ValueError for this URL; it must not escape
+        # the pre-command version check.
+        ("foo @ http://[bad/x", False),
+    ],
+)
+def test_arg_refers_to_pip(arg: str, expected: bool) -> None:
+    assert _arg_refers_to_pip(arg) is expected
