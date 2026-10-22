@@ -124,6 +124,12 @@ def _tar_member_paths(tar):
     paths = set()  # type: Set[str]
     for member in tar.getmembers():
         name = posixpath.normpath(member.name.replace("\\", "/"))
+        if name == ".":
+            # An explicit "." / "./" member is the archive root. Record it so a
+            # symlink resolving to the root (e.g. "./sub/root -> ..") is found,
+            # as tar.getmember(".") did. The root is never added implicitly.
+            paths.add(name)
+            continue
         while name not in ("", ".", "/"):
             paths.add(name)
             parent = posixpath.dirname(name)
