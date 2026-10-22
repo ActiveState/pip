@@ -228,13 +228,18 @@ class Command(CommandContextMixIn):
 
             return exc_logging_wrapper
 
+        def _inner_run(options: Values, args: List[str]) -> int:
+            # The version check fetches everything it needs before the command
+            # body runs, and only prints its prompt afterwards, so nothing is
+            # imported after packages have been installed (CVE-2026-6357). It
+            # runs inside the error interception below, like the body, so an
+            # error or Ctrl-C during the fetch is reported the usual way.
+            with self.pip_version_check(options, args):
+                return self.run(options, args)
+
         if not options.debug_mode:
-            run = intercepts_unhandled_exc(self.run)
+            run = intercepts_unhandled_exc(_inner_run)
         else:
-            run = self.run
+            run = _inner_run
             rich_traceback.install(show_locals=True)
-        # The version check fetches everything it needs before the command
-        # body runs, and only prints its prompt afterwards, so nothing is
-        # imported after packages have been installed (CVE-2026-6357).
-        with self.pip_version_check(options, args):
-            return run(options, args)
+        return run(options, args)

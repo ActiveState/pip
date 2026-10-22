@@ -55,7 +55,10 @@ logger = getLogger(__name__)
 def _arg_refers_to_pip(arg: str) -> bool:
     try:
         req = Requirement(arg)
-    except InvalidRequirement:
+    except (InvalidRequirement, ValueError):
+        # The vendored packaging can raise a plain ValueError (e.g. "Invalid
+        # IPv6 URL" from urllib.parse); leave the real parse error to the
+        # normal requirement handling instead of failing here.
         return False
     return canonicalize_name(req.name) == "pip"
 
