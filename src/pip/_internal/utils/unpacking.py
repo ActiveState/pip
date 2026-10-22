@@ -110,7 +110,11 @@ def _tar_member_paths(tar: tarfile.TarFile) -> Set[str]:
         name = posixpath.normpath(member.name.replace("\\", "/"))
         while name not in ("", ".", "/"):
             paths.add(name)
-            name = posixpath.dirname(name)
+            parent = posixpath.dirname(name)
+            if parent == name:
+                # posixpath.dirname("//") == "//": stop at any fixed point.
+                break
+            name = parent
     return paths
 
 
