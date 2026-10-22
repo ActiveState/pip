@@ -4,6 +4,7 @@ from typing import Optional
 
 import pytest
 
+from pip._internal.exceptions import InstallationError, UnsafeFilenameError
 from pip._internal.models.link import (
     Link,
     as_path_component,
@@ -333,6 +334,14 @@ def test_as_path_component_reduces_to_basename(name: str) -> None:
 def test_as_path_component_rejects_empty_or_parent_reference(name: str) -> None:
     with pytest.raises(ValueError):
         as_path_component(name)
+
+
+def test_as_path_component_error_is_installation_error() -> None:
+    # Reported by pip's command loop as an "ERROR:" line, not a traceback.
+    with pytest.raises(InstallationError) as exc_info:
+        as_path_component("..")
+    assert isinstance(exc_info.value, UnsafeFilenameError)
+    assert isinstance(exc_info.value, ValueError)
 
 
 @pytest.mark.parametrize(

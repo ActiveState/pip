@@ -318,6 +318,14 @@ class InvalidWheelFilename(InstallationError):
     """Invalid wheel filename."""
 
 
+class UnsafeFilenameError(InstallationError, ValueError):
+    """A file name derived from a URL or header is not a single safe path component.
+
+    It is also a ``ValueError`` so existing callers keep working, while pip's
+    command loop reports it as a normal ``ERROR:`` line instead of a traceback.
+    """
+
+
 class UnsupportedWheel(InstallationError):
     """Unsupported wheel."""
 
