@@ -17,6 +17,7 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from pip._internal.exceptions import InstallationError
 from pip._internal.utils.unpacking import (
+    _tar_member_paths,
     is_within_directory,
     unpack_file,
     untar_file,
@@ -456,6 +457,97 @@ class TestUnpackArchives:
             untar_file(tar_filepath, extract_path)
 
         assert not os.path.exists(outside_path)
+
+    def _make_tar(self, name: str, entries: list[tuple[str, str, str]]) -> str:
+        tar_filepath = os.path.join(self.tempdir, name)
+        with tarfile.open(tar_filepath, "w") as tar:
+            for member_name, kind, arg in entries:
+                info = tarfile.TarInfo(member_name)
+                if kind == "dir":
+                    info.type = tarfile.DIRTYPE
+                    tar.addfile(info)
+                elif kind == "sym":
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = arg
+                    tar.addfile(info)
+                else:
+                    data = io.BytesIO(arg.encode())
+                    info.size = len(data.getbuffer())
+                    tar.addfile(info, fileobj=data)
+        return tar_filepath
+
+    def test_unpack_tar_dot_prefixed_symlink_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A "./"-prefixed archive (tar -C dir .) with an internal symlink."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+        tar_filepath = self._make_tar(
+            "dot_prefixed.tar",
+            [
+                ("./", "dir", ""),
+                ("./pkg", "dir", ""),
+                ("./pkg/target.txt", "file", "data\n"),
+                ("./pkg/link", "sym", "target.txt"),
+            ],
+        )
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        untar_file(tar_filepath, extract_path)
+        link = os.path.join(extract_path, "pkg", "link")
+        assert os.path.islink(link)
+        assert os.readlink(link) == "target.txt"
+
+    def test_unpack_tar_symlink_to_implicit_dir_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A symlink to a directory that has no directory entry of its own."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+        tar_filepath = self._make_tar(
+            "implicit_dir.tar",
+            [
+                # A second top-level member stops untar_file stripping "pkg/".
+                ("README", "file", "data\n"),
+                ("pkg/sub/f.txt", "file", "data\n"),
+                ("pkg/link", "sym", "sub"),
+            ],
+        )
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        untar_file(tar_filepath, extract_path)
+        assert os.path.islink(os.path.join(extract_path, "pkg", "link"))
+
+    def test_unpack_tar_symlink_to_non_member_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A symlink to a path that is not in the archive is still refused."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+        tar_filepath = self._make_tar(
+            "non_member.tar",
+            [
+                ("pkg/f.txt", "file", "data\n"),
+                ("pkg/link", "sym", "missing.txt"),
+            ],
+        )
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+        assert not os.path.lexists(os.path.join(extract_path, "pkg", "link"))
+
+
+def test_tar_member_paths_terminates_on_doubled_slash() -> None:
+    """posixpath.dirname("//") == "//"; collecting parents must not loop."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        data = io.BytesIO(b"x")
+        info = tarfile.TarInfo("//abs/f.txt")
+        info.size = 1
+        tar.addfile(info, fileobj=data)
+    buf.seek(0)
+    with tarfile.open(fileobj=buf) as tar:
+        paths = _tar_member_paths(tar)
+    assert "//abs/f.txt" in paths
+    assert "//abs" in paths
 
 
 def test_unpack_tar_unicode(tmpdir: Path) -> None:
