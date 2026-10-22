@@ -9,6 +9,66 @@
 
 .. towncrier release notes start
 
+25.0.1.post1 (2026-10-21)
+=========================
+
+Security Fixes
+--------------
+
+- **CVE-2025-8869**: When ``tarfile.data_filter`` (PEP 706) is unavailable
+  (Python 3.8.0-3.8.16), validate that tar symlink members point to other
+  members inside the same archive before extraction, closing a symlink escape
+  on the fallback extraction path. The fix is hardened as in pypa/pip#14127:
+  every member and every symlink target must also resolve inside the
+  destination after following symlinks, so a chain such as
+  ``link -> ..`` / ``link/file`` can no longer write outside it. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
+- **CVE-2026-1703**: Compare paths on component boundaries in
+  ``is_within_directory`` instead of with ``os.path.commonprefix``, so an
+  extracted file cannot land in a sibling directory whose name is a prefix of
+  the install path. (`GHSA-6vgw-5pg2-w6jp <https://github.com/advisories/GHSA-6vgw-5pg2-w6jp>`_)
+- **CVE-2026-3219**: Disambiguate archive type detection in ``unpack_file``:
+  Content-Type, then file extension, then magic signature, and only when
+  exactly one signature matches. A tar+zip polyglot is no longer always
+  treated as a zip; ambiguous archives are rejected. (`GHSA-58qw-9mgm-455v <https://github.com/advisories/GHSA-58qw-9mgm-455v>`_)
+- **CVE-2026-6357**: Run the pip self-version check (and the imports it
+  needs) before the command body instead of after it, so modules installed by
+  ``pip install`` are not imported later in the same pip invocation. The
+  check is skipped when pip itself is being installed. (`GHSA-jp4c-xjxw-mgf9 <https://github.com/advisories/GHSA-jp4c-xjxw-mgf9>`_)
+- **CVE-2026-8643**: Reject ``console_scripts`` and ``gui_scripts`` entry
+  points whose name would install a script outside the scripts directory.
+  (`GHSA-wf93-45jw-7689 <https://github.com/advisories/GHSA-wf93-45jw-7689>`_)
+- **CVE-2026-13346**: Stop ``Link.filename`` percent-decoding the URL path a
+  second time, so a doubly-encoded separator from a malicious index (e.g.
+  ``..%252F..%252Fevil.whl``) can no longer write a download outside the
+  download directory. Download file names are now always validated as a
+  single path component. (`GHSA-qwm4-qh6w-59xr <https://github.com/advisories/GHSA-qwm4-qh6w-59xr>`_)
+- Upgrade vendored certifi from 2024.8.30 to 2026.10.19 (the release vendored
+  by pip 26.2.2), removing the emSign ECC Root CA - G3 whose intermediate CA
+  keys were compromised. (`GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_)
+
+Bug Fixes
+---------
+
+- ``is_within_directory`` and the entry point scripts check now accept a
+  POSIX ``//``-prefixed path (``pip install --prefix //tmp/x`` no longer fails
+  with "trying to install outside the target directory") and a filesystem
+  root such as ``/`` as the containing directory. A target on another Windows
+  drive is rejected without raising.
+- On the tar fallback path, a symlink whose target is an archive member under
+  a normalized name (a ``./``-prefixed archive made by ``tar -C dir .``) or an
+  implied directory with no entry of its own is no longer refused.
+- A download whose file name reduces to ``.`` or ``..`` is reported as a pip
+  ``ERROR:`` instead of a traceback (``UnsafeFilenameError``).
+- The pre-command version check treats a malformed requirement as "not pip"
+  and leaves it to pip's normal requirement parsing to report.
+
+.. note::
+
+   This is an ActiveState security release of pip 25.0.1, the last pip
+   release supporting Python 3.8. It uses the PEP 440 post-release scheme
+   (``25.0.1.postN``), so it sorts after ``25.0.1`` and before ``25.1``.
+
+
 25.0.1 (2025-02-09)
 ===================
 
