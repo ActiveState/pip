@@ -91,10 +91,15 @@ def is_within_directory(
         abs_target = os.path.abspath(target)
 
     # os.path.commonprefix compares character-by-character, so it treated
-    # "/a/parentfoo" as within "/a/parent" (CVE-2026-1703); commonpath
-    # compares whole path components.
-    prefix = os.path.commonpath([abs_directory, abs_target])
-    return prefix == abs_directory
+    # "/a/parentfoo" as within "/a/parent" (CVE-2026-1703). Compare on a
+    # path-component boundary instead.
+    if abs_target == abs_directory:
+        return True
+    # A filesystem root ("/" or "C:\\") already ends with a separator; appending
+    # another would reject everything. abspath keeps a POSIX "//" prefix, which
+    # os.path.commonpath would drop.
+    prefix = abs_directory if abs_directory.endswith(os.sep) else abs_directory + os.sep
+    return abs_target.startswith(prefix)
 
 
 def is_symlink_target_in_tar(tar: tarfile.TarFile, tarinfo: tarfile.TarInfo) -> bool:

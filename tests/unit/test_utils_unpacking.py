@@ -390,6 +390,38 @@ def test_is_within_directory(args: Tuple[str, str], expected: bool) -> None:
     assert result == expected
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX path roots")
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        # POSIX keeps a doubled leading slash; it must still contain its children.
+        (("//srv/env/bin", "//srv/env/bin/pip"), True),
+        (("//srv/env/bin", "//srv/env/binfoo"), False),
+        (("//srv/env/bin", "//srv/env/bin/../outside"), False),
+        # The filesystem root contains everything, including itself.
+        (("/", "/usr/bin/pip"), True),
+        (("/", "/"), True),
+    ],
+)
+def test_is_within_directory_posix_roots(args: Tuple[str, str], expected: bool) -> None:
+    assert is_within_directory(*args) is expected
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drive letters")
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        (("C:\\", "C:\\Python\\Scripts\\pip.exe"), True),
+        # A target on another drive is rejected without raising.
+        (("C:\\env", "D:\\outside"), False),
+    ],
+)
+def test_is_within_directory_windows_drives(
+    args: Tuple[str, str], expected: bool
+) -> None:
+    assert is_within_directory(*args) is expected
+
+
 @pytest.mark.parametrize(
     "is_zip, is_tar, unzip, untar, exception",
     [
