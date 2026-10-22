@@ -104,10 +104,17 @@ def is_within_directory(directory, target, resolve_symlinks=False):
     #       "/a/parent" and "/a/parentfoo" as sharing the prefix "/a/parent"
     #       and would report the latter as "within" the former (CVE-2026-1703).
     #       os.path.commonpath compares on path components but is unavailable on
-    #       Python 2.7, so enforce a component boundary explicitly instead.
-    return abs_target == abs_directory or abs_target.startswith(
-        abs_directory + os.sep
-    )
+    #       Python 2.7 (and drops a POSIX "//" prefix), so enforce a component
+    #       boundary explicitly instead.
+    if abs_target == abs_directory:
+        return True
+    # A filesystem root ("/" or "C:\\") already ends with a separator;
+    # appending another would reject everything.
+    if abs_directory.endswith(os.sep):
+        prefix = abs_directory
+    else:
+        prefix = abs_directory + os.sep
+    return abs_target.startswith(prefix)
 
 
 def is_symlink_target_in_tar(tar, tarinfo):

@@ -289,10 +289,33 @@ class TestUnpackArchives(object):
     # CVE-2026-1703: a sibling whose name has the directory as a string
     # prefix must not be considered "within" it.
     (('parent/child', 'parent/childfoo'), False),
+    # A filesystem root contains everything below it.
+    (('/', '/usr/bin/pip'), True),
+    (('/', '/'), True),
 ])
 def test_is_within_directory(args, expected):
     result = is_within_directory(*args)
     assert result == expected
+
+
+@pytest.mark.skipif("sys.platform == 'win32'")
+def test_is_within_directory_doubled_slash_root():
+    # POSIX keeps a leading "//"; the containment check must too.
+    assert is_within_directory('//srv/env/bin', '//srv/env/bin/pip')
+    assert not is_within_directory('//srv/env/bin', '//srv/env/binfoo')
+
+
+def test_is_within_directory_resolve_symlinks(tmpdir):
+    base = str(tmpdir)
+    inside = os.path.join(base, 'inside')
+    os.mkdir(inside)
+    if not hasattr(os, 'symlink'):
+        pytest.skip('os.symlink is unavailable')
+    os.symlink(base, os.path.join(inside, 'up'))
+    target = os.path.join(inside, 'up', 'outside.txt')
+    # Textually inside, but the symlink resolves to the parent.
+    assert is_within_directory(inside, target)
+    assert not is_within_directory(inside, target, resolve_symlinks=True)
 
 
 def _make_tar_zip_polyglot(path):

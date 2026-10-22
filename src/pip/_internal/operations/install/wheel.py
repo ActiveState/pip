@@ -478,7 +478,9 @@ def _script_within_dir(name, scripts_dir):
     """
     root = os.path.normpath(scripts_dir)
     dest = os.path.normpath(os.path.join(scripts_dir, name))
-    return dest.startswith(root + os.sep)
+    # The script must be a file *inside* the directory, never the directory
+    # itself.
+    return dest != root and is_within_directory(root, dest)
 
 
 def _raise_for_invalid_entrypoint(specification, scripts_dir):
