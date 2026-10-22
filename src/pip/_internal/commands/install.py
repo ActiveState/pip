@@ -62,7 +62,9 @@ logger = getLogger(__name__)
 def _arg_refers_to_pip(arg: str) -> bool:
     try:
         req = Requirement(arg)
-    except InvalidRequirement:
+    except (InvalidRequirement, ValueError):
+        # A malformed requirement is not pip; leave it for pip's normal
+        # requirement parsing to report.
         return False
     return canonicalize_name(req.name) == "pip"
 

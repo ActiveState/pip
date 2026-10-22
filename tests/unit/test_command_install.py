@@ -120,3 +120,27 @@ def test_create_os_error_message(
     monkeypatch.setattr(install, "running_under_virtualenv", lambda: False)
     msg = create_os_error_message(error, show_traceback, using_user_site)
     assert msg == expected
+
+
+@pytest.mark.parametrize(
+    "arg, expected",
+    [
+        ("pip", True),
+        ("PIP>=1", True),
+        ("pip @ https://example.com/pip.whl", True),
+        ("requests", False),
+        ("./local/dir", False),
+        ("foo @ http://[bad/x", False),
+    ],
+)
+def test_arg_refers_to_pip(arg: str, expected: bool) -> None:
+    assert install._arg_refers_to_pip(arg) is expected
+
+
+def test_arg_refers_to_pip_value_error_is_not_pip() -> None:
+    # Older vendored packaging can let urllib's ValueError escape for a
+    # malformed URL; that must not abort the command before it runs.
+    with mock.patch.object(
+        install, "Requirement", side_effect=ValueError("Invalid IPv6 URL")
+    ):
+        assert install._arg_refers_to_pip("foo @ http://[bad/x") is False
