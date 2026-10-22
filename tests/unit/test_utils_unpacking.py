@@ -12,6 +12,7 @@ import pytest
 
 from pip._internal.exceptions import InstallationError
 from pip._internal.utils.unpacking import (
+    _tar_member_paths,
     is_within_directory,
     unpack_file,
     untar_file,
@@ -422,3 +423,20 @@ def test_unpack_polyglot_ambiguous_rejected(tmpdir):
     _make_tar_zip_polyglot(archive)
     with pytest.raises(InstallationError):
         unpack_file(archive, os.path.join(str(tmpdir), 'out'))
+
+def test_tar_member_paths_terminates_on_doubled_slash():
+    """posixpath.dirname("//") == "//"; collecting parents must not loop."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        data = io.BytesIO(b"x")
+        info = tarfile.TarInfo("//abs/f.txt")
+        info.size = 1
+        tar.addfile(info, fileobj=data)
+    buf.seek(0)
+    tar = tarfile.open(fileobj=buf)
+    try:
+        paths = _tar_member_paths(tar)
+    finally:
+        tar.close()
+    assert "//abs/f.txt" in paths
+    assert "//abs" in paths
