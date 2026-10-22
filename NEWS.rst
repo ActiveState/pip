@@ -9,6 +9,70 @@
 
 .. towncrier release notes start
 
+26.0.1.post1 (2026-10-21)
+=========================
+
+Security Fixes
+--------------
+
+- **CVE-2026-3219**: Disambiguate archive type detection in ``unpack_file``
+  so a tar+zip polyglot is no longer always treated as a zip; ambiguous
+  archives are rejected. (`GHSA-58qw-9mgm-455v <https://github.com/advisories/GHSA-58qw-9mgm-455v>`_)
+- **CVE-2026-6357**: Run the network and import side of the pip
+  self-version check before the command body, so a just-installed wheel
+  cannot shadow a module the check imports afterwards; only the upgrade
+  prompt is printed after the command. (`GHSA-jp4c-xjxw-mgf9 <https://github.com/advisories/GHSA-jp4c-xjxw-mgf9>`_)
+- **CVE-2026-8643**: Reject ``console_scripts`` and ``gui_scripts`` entry
+  points whose name would install a script outside the scripts directory.
+  The vendored distlib 0.4.0 accepts such names unchanged, so this release
+  was directly affected. (`GHSA-wf93-45jw-7689 <https://github.com/advisories/GHSA-wf93-45jw-7689>`_)
+- **CVE-2026-13346**: Stop ``Link.filename`` percent-decoding the URL path a
+  second time, so a doubly-encoded separator from a malicious index (e.g.
+  ``..%252F..%252Fevil.whl``) can no longer write a download outside the
+  download directory. Download file names are now always validated as a
+  single path component. (`GHSA-qwm4-qh6w-59xr <https://github.com/advisories/GHSA-qwm4-qh6w-59xr>`_)
+- **GHSA-6q48-6c7w-9gw2**: Upgrade vendored certifi from 2026.1.4 to
+  2026.10.19 (the release vendored by pip 26.2.2), dropping the emSign ECC
+  Root CA - G3, whose intermediate CA keys were compromised. (`GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_)
+- **CVE-2025-8869**: Harden the tar extraction fallback (used when
+  ``tarfile.data_filter`` is unavailable, i.e. Python 3.9.0-3.9.16), porting
+  pypa/pip#14127: members are also checked after resolving symlinks, and a
+  symlink that resolves outside the destination is rejected before it is
+  created. Previously a symlink to ``.`` or ``..`` let a later member be
+  written outside the extract directory. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
+
+Bug Fixes
+---------
+
+- ``is_within_directory`` no longer uses ``os.path.commonpath``, so installs
+  under a POSIX ``//``-prefixed path (e.g. ``--prefix //tmp/x``) work again,
+  and a directory at a filesystem root (``/`` or ``C:\``) is handled; a
+  target on another Windows drive is reported as outside instead of raising.
+- A scripts directory at a filesystem root no longer rejects every console
+  or GUI script (the CVE-2026-8643 check now uses ``is_within_directory``).
+- The tar fallback's symlink check compares normalized member names, so
+  ``./``-prefixed archives and links to a directory that has no entry of its
+  own unpack again; containment is still enforced by the symlink-resolving
+  checks above.
+- An unsafe download file name (e.g. ``Content-Disposition: filename=".."``)
+  is reported as a pip ``ERROR:`` instead of a ``ValueError`` traceback.
+- The ``pip install pip`` detection used by the self-version check no longer
+  fails on a requirement that makes packaging raise a bare ``ValueError``.
+
+.. note::
+
+   CVE-2026-1703 / GHSA-6vgw-5pg2-w6jp (``is_within_directory`` prefix
+   comparison) was already fixed upstream before pip 26.0.1.
+   CVE-2025-8869 / GHSA-4xh5-x5gv-qwph (tar symlink targets on the
+   extraction fallback) was fixed in 26.0.1 and is hardened in this release
+   (see above).
+
+   This is an ActiveState security release for Python 3.9, the last Python
+   version pip 26.0.x supports (pip 26.1 requires Python 3.10). It uses the
+   PEP 440 post-release scheme: ``26.0.1.post1`` sorts after ``26.0.1`` and
+   before ``26.0.2``.
+
+
 26.0.1 (2026-02-04)
 ===================
 

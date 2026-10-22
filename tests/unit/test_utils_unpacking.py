@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import io
 import os
 import shutil
@@ -8,12 +10,19 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from pip._internal.exceptions import InstallationError
-from pip._internal.utils.unpacking import is_within_directory, untar_file, unzip_file
+from pip._internal.utils.unpacking import (
+    _tar_member_paths,
+    is_within_directory,
+    unpack_file,
+    untar_file,
+    unzip_file,
+)
 
 from tests.lib import TestData
 
@@ -381,6 +390,165 @@ class TestUnpackArchives:
 
         assert not os.path.exists(os.path.join(extract_path, "evil_symlink"))
 
+    def test_unpack_tar_symlink_then_member_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """Reject a symlink to outside before a member is written through it."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+
+        tar_filepath = os.path.join(self.tempdir, "symlink_then_member.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        outside_path = os.path.join(self.tempdir, "outside.txt")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            info = tarfile.TarInfo("outside_link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = ".."
+            tar.addfile(info)
+
+            data = io.BytesIO(b"data\n")
+            info = tarfile.TarInfo("outside_link/outside.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+            info = tarfile.TarInfo("..")
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
+        assert not os.path.exists(outside_path)
+        assert not os.path.exists(os.path.join(extract_path, "outside_link"))
+
+    def test_unpack_tar_nested_symlink_traversal_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """Reject a member that escapes through a chain of in-bounds symlinks."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+
+        tar_filepath = os.path.join(self.tempdir, "nested_traversal.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        outside_path = os.path.join(self.tempdir, "outside.txt")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            info = tarfile.TarInfo(".")
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+
+            info = tarfile.TarInfo("redir")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "."
+            tar.addfile(info)
+
+            info = tarfile.TarInfo("redir/up")
+            info.type = tarfile.SYMTYPE
+            info.linkname = ".."
+            tar.addfile(info)
+
+            data = io.BytesIO(b"data\n")
+            info = tarfile.TarInfo("redir/up/outside.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
+        assert not os.path.exists(outside_path)
+
+    def _make_tar(self, name: str, entries: list[tuple[str, str, str]]) -> str:
+        tar_filepath = os.path.join(self.tempdir, name)
+        with tarfile.open(tar_filepath, "w") as tar:
+            for member_name, kind, arg in entries:
+                info = tarfile.TarInfo(member_name)
+                if kind == "dir":
+                    info.type = tarfile.DIRTYPE
+                    tar.addfile(info)
+                elif kind == "sym":
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = arg
+                    tar.addfile(info)
+                else:
+                    data = io.BytesIO(arg.encode())
+                    info.size = len(data.getbuffer())
+                    tar.addfile(info, fileobj=data)
+        return tar_filepath
+
+    def test_unpack_tar_dot_prefixed_symlink_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A "./"-prefixed archive (tar -C dir .) with an internal symlink."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+        tar_filepath = self._make_tar(
+            "dot_prefixed.tar",
+            [
+                ("./", "dir", ""),
+                ("./pkg", "dir", ""),
+                ("./pkg/target.txt", "file", "data\n"),
+                ("./pkg/link", "sym", "target.txt"),
+            ],
+        )
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        untar_file(tar_filepath, extract_path)
+        link = os.path.join(extract_path, "pkg", "link")
+        assert os.path.islink(link)
+        assert os.readlink(link) == "target.txt"
+
+    def test_unpack_tar_symlink_to_implicit_dir_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A symlink to a directory that has no directory entry of its own."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+        tar_filepath = self._make_tar(
+            "implicit_dir.tar",
+            [
+                # A second top-level member stops untar_file stripping "pkg/".
+                ("README", "file", "data\n"),
+                ("pkg/sub/f.txt", "file", "data\n"),
+                ("pkg/link", "sym", "sub"),
+            ],
+        )
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        untar_file(tar_filepath, extract_path)
+        assert os.path.islink(os.path.join(extract_path, "pkg", "link"))
+
+    def test_unpack_tar_symlink_to_non_member_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A symlink to a path that is not in the archive is still refused."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+        tar_filepath = self._make_tar(
+            "non_member.tar",
+            [
+                ("pkg/f.txt", "file", "data\n"),
+                ("pkg/link", "sym", "missing.txt"),
+            ],
+        )
+        extract_path = os.path.join(self.tempdir, "extract_path")
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+        assert not os.path.lexists(os.path.join(extract_path, "pkg", "link"))
+
+
+def test_tar_member_paths_terminates_on_doubled_slash() -> None:
+    """posixpath.dirname("//") == "//"; collecting parents must not loop."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        data = io.BytesIO(b"x")
+        info = tarfile.TarInfo("//abs/f.txt")
+        info.size = 1
+        tar.addfile(info, fileobj=data)
+    buf.seek(0)
+    with tarfile.open(fileobj=buf) as tar:
+        paths = _tar_member_paths(tar)
+    assert "//abs/f.txt" in paths
+    assert "//abs" in paths
+
 
 def test_unpack_tar_unicode(tmpdir: Path) -> None:
     test_tar = tmpdir / "test.tar"
@@ -419,3 +587,229 @@ def test_unpack_tar_unicode(tmpdir: Path) -> None:
 def test_is_within_directory(args: tuple[str, str], expected: bool) -> None:
     result = is_within_directory(*args)
     assert result == expected
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX path semantics")
+@pytest.mark.parametrize(
+    "directory, target, expected",
+    [
+        # os.path.commonpath drops the POSIX "//" prefix; abspath keeps it.
+        ("//srv/env/bin", "//srv/env/bin/pip", True),
+        ("//srv/env/bin", "//srv/env/binfoo/pip", False),
+        # A filesystem root already ends with a separator.
+        ("/", "/usr/bin/pip", True),
+        ("/", "/", True),
+    ],
+)
+def test_is_within_directory_posix_roots(
+    directory: str, target: str, expected: bool
+) -> None:
+    assert is_within_directory(directory, target) is expected
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drive letters only on Windows")
+def test_is_within_directory_other_drive() -> None:
+    # A target on another drive is outside, and the check must not raise.
+    assert is_within_directory("C:\\env", "D:\\outside") is False
+    assert is_within_directory("C:\\", "C:\\env\\pip") is True
+
+
+@pytest.mark.parametrize(
+    "is_zip, is_tar, unzip, untar, exception",
+    [
+        # zip file
+        (True, False, True, False, False),
+        # tar file
+        (False, True, False, True, False),
+        # neither zip nor tar
+        (False, False, False, False, True),
+        # ambiguous (both zip and tar)
+        (True, True, False, False, True),
+    ],
+)
+@patch("pip._internal.utils.unpacking.tarfile")
+@patch("pip._internal.utils.unpacking.zipfile")
+@patch("pip._internal.utils.unpacking.untar_file")
+@patch("pip._internal.utils.unpacking.unzip_file")
+def test_magic_signature_check_logic(
+    mock_unzip: MagicMock,
+    mock_untar: MagicMock,
+    mock_zipfile: MagicMock,
+    mock_tarfile: MagicMock,
+    is_zip: bool,
+    is_tar: bool,
+    unzip: bool,
+    untar: bool,
+    exception: bool,
+) -> None:
+    """
+    Test that pip throws an error if file is identified as both zip and tar
+    and all other checks came out undeterministic.
+    """
+    mock_tarfile.is_tarfile.return_value = is_tar
+    mock_zipfile.is_zipfile.return_value = is_zip
+    filename = "ambiguous-file.unknown-extension"
+
+    if exception:
+        with pytest.raises(InstallationError):
+            unpack_file(filename, "any-location", content_type=None)
+    else:
+        unpack_file(filename, "any-location", content_type=None)
+
+    mock_unzip.assert_called_once() if unzip else mock_unzip.assert_not_called()
+    mock_untar.assert_called_once() if untar else mock_untar.assert_not_called()
+    mock_tarfile.is_tarfile.assert_called_once()
+    mock_zipfile.is_zipfile.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "filename, content_type, unzip, untar",
+    [
+        # content_type check
+        ("noname", "application/zip", True, False),
+        ("noname", "application/x-gzip", False, True),
+        # filename check
+        ("ok.zip", None, True, False),
+        ("ok.tar.gz", None, False, True),
+    ],
+)
+@patch("pip._internal.utils.unpacking.tarfile")
+@patch("pip._internal.utils.unpacking.zipfile")
+@patch("pip._internal.utils.unpacking.untar_file")
+@patch("pip._internal.utils.unpacking.unzip_file")
+def test_check_priority(
+    mock_unzip: MagicMock,
+    mock_untar: MagicMock,
+    mock_zipfile: MagicMock,
+    mock_tarfile: MagicMock,
+    filename: str,
+    content_type: str | None,
+    unzip: bool,
+    untar: bool,
+) -> None:
+    """
+    Test the order of priority of checks to ensure
+    we don't use magic signature check unless we have to.
+    """
+    unpack_file(filename, "any-location", content_type=content_type)
+    mock_unzip.assert_called_once() if unzip else mock_unzip.assert_not_called()
+    mock_untar.assert_called_once() if untar else mock_untar.assert_not_called()
+    mock_zipfile.is_zipfile.assert_not_called()
+    mock_tarfile.is_tarfile.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "filename, expect_unzip",
+    [
+        ("pkg.zip", True),
+        ("pkg.ZIP", True),
+        ("pkg-1.0-py3-none-any.whl", True),
+        ("pkg.tar.gz", False),
+        ("pkg.TAR.GZ", False),
+        ("pkg.tgz", False),
+        ("pkg.tar", False),
+        ("pkg.tar.bz2", False),
+        ("pkg.tbz", False),
+        ("pkg.tar.xz", False),
+        ("pkg.txz", False),
+        ("pkg.tlz", False),
+        ("pkg.tar.lz", False),
+        ("pkg.tar.lzma", False),
+    ],
+)
+@patch("pip._internal.utils.unpacking.tarfile")
+@patch("pip._internal.utils.unpacking.zipfile")
+@patch("pip._internal.utils.unpacking.untar_file")
+@patch("pip._internal.utils.unpacking.unzip_file")
+def test_filename_extension_routing(
+    mock_unzip: MagicMock,
+    mock_untar: MagicMock,
+    mock_zipfile: MagicMock,
+    mock_tarfile: MagicMock,
+    filename: str,
+    expect_unzip: bool,
+) -> None:
+    unpack_file(filename, "any-location", content_type=None)
+    (mock_unzip if expect_unzip else mock_untar).assert_called_once()
+    (mock_untar if expect_unzip else mock_unzip).assert_not_called()
+    mock_zipfile.is_zipfile.assert_not_called()
+    mock_tarfile.is_tarfile.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "content_type, filename, expect_unzip",
+    [
+        ("application/zip", "pkg.tar.gz", True),
+        ("application/x-gzip", "pkg.zip", False),
+        ("application/x-gzip", "pkg.whl", False),
+        ("application/octet-stream", "pkg.zip", True),
+        ("application/octet-stream", "pkg.tar.gz", False),
+    ],
+)
+@patch("pip._internal.utils.unpacking.tarfile")
+@patch("pip._internal.utils.unpacking.zipfile")
+@patch("pip._internal.utils.unpacking.untar_file")
+@patch("pip._internal.utils.unpacking.unzip_file")
+def test_content_type_vs_filename_priority(
+    mock_unzip: MagicMock,
+    mock_untar: MagicMock,
+    mock_zipfile: MagicMock,
+    mock_tarfile: MagicMock,
+    content_type: str,
+    filename: str,
+    expect_unzip: bool,
+) -> None:
+    unpack_file(filename, "any-location", content_type=content_type)
+    (mock_unzip if expect_unzip else mock_untar).assert_called_once()
+    (mock_untar if expect_unzip else mock_unzip).assert_not_called()
+    mock_zipfile.is_zipfile.assert_not_called()
+    mock_tarfile.is_tarfile.assert_not_called()
+
+
+@pytest.mark.parametrize("filename, flatten", [("pkg.whl", False), ("pkg.zip", True)])
+@patch("pip._internal.utils.unpacking.unzip_file")
+def test_flatten_only_for_non_whl(
+    mock_unzip: MagicMock, filename: str, flatten: bool
+) -> None:
+    unpack_file(filename, "any-location", content_type=None)
+    assert mock_unzip.call_args.kwargs["flatten"] is flatten
+
+
+def _write_polyglot(path: Path) -> None:
+    """Write a tar.gz with a zip appended; both views contain payload.txt."""
+    tar_buf = io.BytesIO()
+    with tarfile.open(fileobj=tar_buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo("pkg/payload.txt")
+        info.size = 8
+        tar.addfile(info, io.BytesIO(b"from-tar"))
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w") as zf:
+        zf.writestr("pkg/payload.txt", "from-zip")
+    path.write_bytes(tar_buf.getvalue() + zip_buf.getvalue())
+
+
+@pytest.mark.parametrize(
+    "filename, content_type, expected",
+    [
+        ("pkg.tar.gz", None, b"from-tar"),
+        ("pkg.tgz", None, b"from-tar"),
+        ("pkg.zip", None, b"from-zip"),
+        ("pkg.tar.gz", "application/zip", b"from-zip"),
+        ("pkg.unknown", "application/x-gzip", b"from-tar"),
+    ],
+)
+def test_polyglot_routing(
+    tmp_path: Path, filename: str, content_type: str | None, expected: bytes
+) -> None:
+    archive = tmp_path / filename
+    _write_polyglot(archive)
+    out = tmp_path / "out"
+    unpack_file(str(archive), str(out), content_type=content_type)
+    assert (out / "payload.txt").read_bytes() == expected
+
+
+def test_polyglot_ambiguous_name_rejected(tmp_path: Path) -> None:
+    archive = tmp_path / "pkg.bin"
+    _write_polyglot(archive)
+    with pytest.raises(InstallationError):
+        unpack_file(str(archive), str(tmp_path / "out"))
