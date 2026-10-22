@@ -497,6 +497,31 @@ def test_is_within_directory(args: tuple[str, str], expected: bool) -> None:
     assert result == expected
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX path semantics")
+@pytest.mark.parametrize(
+    "directory, target, expected",
+    [
+        # os.path.commonpath drops the POSIX "//" prefix; it must still match.
+        ("//srv/env/bin", "//srv/env/bin/pip", True),
+        ("//srv/env/bin", "//srv/env/binfoo/pip", False),
+        # A filesystem root already ends with a separator.
+        ("/", "/usr/bin/pip", True),
+        ("/", "/", True),
+    ],
+)
+def test_is_within_directory_root_and_double_slash(
+    directory: str, target: str, expected: bool
+) -> None:
+    assert is_within_directory(directory, target) is expected
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drive letters only on Windows")
+def test_is_within_directory_other_drive() -> None:
+    # A target on another drive is outside, and must not raise (commonpath did).
+    assert is_within_directory("C:\\env", "D:\\outside") is False
+    assert is_within_directory("C:\\", "C:\\env\\pip") is True
+
+
 @pytest.mark.parametrize(
     "is_zip, is_tar, unzip, untar, exception",
     [
