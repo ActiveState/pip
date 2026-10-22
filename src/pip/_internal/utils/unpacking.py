@@ -74,15 +74,30 @@ def has_leading_dir(paths: Iterable[str]) -> bool:
     return True
 
 
-def is_within_directory(directory: str, target: str) -> bool:
+def is_within_directory(
+    directory: str, target: str, *, resolve_symlinks: bool = False
+) -> bool:
     """
     Return true if the absolute path of target is within the directory
-    """
-    abs_directory = os.path.abspath(directory)
-    abs_target = os.path.abspath(target)
+    (including when target is equal to the directory).
 
-    prefix = os.path.commonpath([abs_directory, abs_target])
-    return prefix == abs_directory
+    When ``resolve_symlinks`` is true, resolve symlinks before comparing so
+    traversal through a symlink (e.g. "link/../file") is also caught.
+    """
+    if resolve_symlinks:
+        abs_directory = os.path.realpath(directory)
+        abs_target = os.path.realpath(target)
+    else:
+        abs_directory = os.path.abspath(directory)
+        abs_target = os.path.abspath(target)
+
+    if abs_target == abs_directory:
+        return True
+    # A filesystem root ("/" or "C:\\") already ends with a separator; appending
+    # another would reject everything. abspath keeps a POSIX "//" prefix, which
+    # os.path.commonpath would drop.
+    prefix = abs_directory if abs_directory.endswith(os.sep) else abs_directory + os.sep
+    return abs_target.startswith(prefix)
 
 
 def is_symlink_target_in_tar(tar: tarfile.TarFile, tarinfo: tarfile.TarInfo) -> bool:

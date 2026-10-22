@@ -401,6 +401,31 @@ def test_is_within_directory(args: Tuple[str, str], expected: bool) -> None:
     assert result == expected
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only path forms")
+@pytest.mark.parametrize(
+    "directory, target, expected",
+    [
+        # os.path.commonpath drops a POSIX "//" prefix; it must still match.
+        ("//srv/env/bin", "//srv/env/bin/pip", True),
+        ("//srv/env/bin", "//srv/env/binfoo/pip", False),
+        # A filesystem root contains everything below it.
+        ("/", "/usr/bin/pip", True),
+        ("/", "/", True),
+    ],
+)
+def test_is_within_directory_root_forms(
+    directory: str, target: str, expected: bool
+) -> None:
+    assert is_within_directory(directory, target) is expected
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drive letters are Windows-only")
+def test_is_within_directory_other_drive() -> None:
+    # A target on another drive is outside, and must not raise.
+    assert is_within_directory("C:\\env", "D:\\env\\pip") is False
+    assert is_within_directory("C:\\", "C:\\env\\pip") is True
+
+
 @pytest.mark.parametrize(
     "is_zip, is_tar, unzip, untar, exception",
     [
