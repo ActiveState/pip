@@ -67,7 +67,7 @@ def test_rev_options_repr() -> None:
         # First check VCS-specific RevOptions behavior.
         (Bazaar, [], ["-r", "123"], {}),
         (Git, ["HEAD"], ["123"], {}),
-        (Mercurial, [], ["-r=123"], {}),
+        (Mercurial, [], ["--rev=123"], {}),
         (Subversion, [], ["-r", "123"], {}),
         # Test extra_args.  For this, test using a single VersionControl class.
         (
@@ -315,11 +315,13 @@ def test_git_is_commit_id_equal(
 def test_mercurial_rev_not_interpreted_as_option() -> None:
     """
     CVE-2023-5752: a malicious hg revision (e.g. ``--config=...``) must be
-    passed as a single ``-r=<rev>`` token so hg cannot parse it as an option.
+    passed as a single ``--rev=<rev>`` token so hg cannot parse it as an option.
+    The short ``-r=<rev>`` form must not be used: hg reads ``-r=0`` as the
+    revset ``=0`` and fails (pypa/pip#12373).
     """
     rev = "--config=alias.update=!touch owned"
     args = Mercurial.get_base_rev_args(rev)
-    assert args == [f"-r={rev}"]
+    assert args == [f"--rev={rev}"]
     # A single token means hg treats the whole thing as the value of -r.
     assert len(args) == 1
 
