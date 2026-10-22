@@ -1,13 +1,14 @@
+import contextlib
 import logging
 import os
 from optparse import Values
-from typing import Callable, Iterator, List, NoReturn, Optional
+from typing import Callable, Iterator, List, NoReturn, Optional, Type
 from unittest.mock import Mock, patch
 
 import pytest
 
 from pip._internal.cli.base_command import Command
-from pip._internal.cli.status_codes import SUCCESS
+from pip._internal.cli.status_codes import ERROR, SUCCESS, UNKNOWN_ERROR
 from pip._internal.utils import temp_dir
 from pip._internal.utils.logging import BrokenStdoutLoggingError
 from pip._internal.utils.temp_dir import TempDirectory
@@ -93,14 +94,50 @@ class TestCommand:
         assert "Traceback (most recent call last):" in stderr
 
 
-@patch("pip._internal.cli.req_command.Command.handle_pip_version_check")
-def test_handle_pip_version_check_called(mock_handle_version_check: Mock) -> None:
+@patch("pip._internal.cli.req_command.Command.pip_version_check")
+def test_pip_version_check_called(mock_version_check: Mock) -> None:
     """
-    Check that Command.handle_pip_version_check() is called.
+    Check that ``Command.pip_version_check()`` wraps the command body.
     """
     cmd = FakeCommand()
     cmd.main([])
-    mock_handle_version_check.assert_called_once()
+    mock_version_check.assert_called_once()
+
+
+class FakeCommandFailingVersionCheck(FakeCommand):
+    """A command whose pre-command version check fetch raises."""
+
+    _name = "fake_failing_check"
+    check_error: Type[BaseException] = ValueError
+
+    @contextlib.contextmanager
+    def pip_version_check(self, options: Values, args: List[str]) -> Iterator[None]:
+        raise self.check_error("raised while fetching the version check")
+        yield  # pragma: no cover
+
+
+@pytest.mark.parametrize(
+    "error, expected_status, expected_message",
+    [
+        (KeyboardInterrupt, ERROR, "Operation cancelled by user"),
+        (ValueError, UNKNOWN_ERROR, "raised while fetching the version check"),
+    ],
+)
+def test_pip_version_check_fetch_errors_are_handled(
+    capsys: pytest.CaptureFixture[str],
+    error: Type[BaseException],
+    expected_status: int,
+    expected_message: str,
+) -> None:
+    """
+    The version check runs before the command body (CVE-2026-6357), inside
+    pip's error handling: a failure or Ctrl-C during the fetch is reported
+    as a command error instead of escaping as a raw exception.
+    """
+    cmd = FakeCommandFailingVersionCheck()
+    cmd.check_error = error
+    assert cmd.main([]) == expected_status
+    assert expected_message in capsys.readouterr().err
 
 
 def test_log_command_success(fixed_time: None, tmpdir: Path) -> None:

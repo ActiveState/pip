@@ -5,7 +5,7 @@ import logging
 import optparse
 import os.path
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, NamedTuple, Optional
 
 from pip._vendor.packaging.version import parse as parse_version
 
@@ -86,26 +86,30 @@ class SelfCheckState:
             pass
 
 
-def was_installed_by_pip(pkg: str) -> bool:
-    """Checks whether pkg was installed by pip
+class UpgradePrompt(NamedTuple):
+    """The upgrade prompt computed before a command runs."""
 
-    This is used not to display the upgrade message when pip is in fact
-    installed by system package manager, such as dnf on Fedora.
-    """
-    dist = get_default_environment().get_distribution(pkg)
-    return dist is not None and "pip" == dist.installer
+    old: str
+    new: str
 
 
-def pip_self_version_check(session: PipSession, options: optparse.Values) -> None:
-    """Check for an update for pip.
+def pip_self_version_check_fetch(
+    session: PipSession, options: optparse.Values
+) -> Optional[UpgradePrompt]:
+    """Compute the pip upgrade prompt, if any, before the command runs.
 
     Limit the frequency of checks to once per week. State is stored either in
     the active virtualenv or in the user's USER_CACHE_DIR keyed off the prefix
     of the pip script path.
+
+    Everything that inspects the environment or builds a PackageFinder lives
+    here, so it runs before the command body has installed anything. Pair with
+    :func:`pip_self_version_check_emit`, which only displays the prompt after
+    the command body runs (CVE-2026-6357).
     """
     installed_dist = get_default_environment().get_distribution("pip")
     if not installed_dist:
-        return
+        return None
 
     pip_version = installed_dist.version
     pypi_version = None
@@ -144,7 +148,7 @@ def pip_self_version_check(session: PipSession, options: optparse.Values) -> Non
             )
             best_candidate = finder.find_best_candidate("pip").best_candidate
             if best_candidate is None:
-                return
+                return None
             pypi_version = str(best_candidate.version)
 
             # save that we've performed a check
@@ -155,28 +159,54 @@ def pip_self_version_check(session: PipSession, options: optparse.Values) -> Non
         local_version_is_older = (
             pip_version < remote_version
             and pip_version.base_version != remote_version.base_version
-            and was_installed_by_pip("pip")
+            # Only suggest an upgrade when pip was installed by pip, not by a
+            # system package manager such as dnf on Fedora. Read from the dist
+            # found above instead of re-querying the environment later.
+            and installed_dist.installer == "pip"
         )
 
         # Determine if our pypi_version is older
         if not local_version_is_older:
-            return
+            return None
 
-        # We cannot tell how the current pip is available in the current
-        # command context, so be pragmatic here and suggest the command
-        # that's always available. This does not accommodate spaces in
-        # `sys.executable`.
-        pip_cmd = f"{sys.executable} -m pip"
-        logger.warning(
-            "You are using pip version %s; however, version %s is "
-            "available.\nYou should consider upgrading via the "
-            "'%s install --upgrade pip' command.",
-            pip_version,
-            pypi_version,
-            pip_cmd,
-        )
+        return UpgradePrompt(old=str(pip_version), new=pypi_version)
     except Exception:
         logger.debug(
             "There was an error checking the latest version of pip",
             exc_info=True,
         )
+        return None
+
+
+def pip_self_version_check_emit(upgrade_prompt: Optional[UpgradePrompt]) -> None:
+    """Emit the upgrade prompt captured by :func:`pip_self_version_check_fetch`.
+
+    This only logs; it must not import anything or inspect the environment,
+    because it runs after packages may have been installed.
+    """
+    if upgrade_prompt is None:
+        return
+
+    # We cannot tell how the current pip is available in the current
+    # command context, so be pragmatic here and suggest the command
+    # that's always available. This does not accommodate spaces in
+    # `sys.executable`.
+    pip_cmd = f"{sys.executable} -m pip"
+    logger.warning(
+        "You are using pip version %s; however, version %s is "
+        "available.\nYou should consider upgrading via the "
+        "'%s install --upgrade pip' command.",
+        upgrade_prompt.old,
+        upgrade_prompt.new,
+        pip_cmd,
+    )
+
+
+def pip_self_version_check(session: PipSession, options: optparse.Values) -> None:
+    """Check for an update for pip and emit the prompt immediately.
+
+    Kept for callers of the pre-CVE-2026-6357 API. pip itself no longer uses
+    it: commands fetch before running and emit afterwards (see
+    ``IndexGroupCommand.pip_version_check``).
+    """
+    pip_self_version_check_emit(pip_self_version_check_fetch(session, options))

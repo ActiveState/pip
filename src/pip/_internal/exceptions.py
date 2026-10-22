@@ -26,6 +26,10 @@ class InstallationError(PipError):
     """General exception during installation"""
 
 
+class UnsafeFilenameError(InstallationError, ValueError):
+    """A file name derived from a URL or header is not a single safe path component."""
+
+
 class UninstallationError(PipError):
     """General exception during uninstallation"""
 
