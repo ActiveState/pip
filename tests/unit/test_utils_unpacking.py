@@ -429,6 +429,88 @@ class TestUnpackArchives:
 
         assert not os.path.exists(outside_path)
 
+    def test_unpack_tar_dot_prefixed_symlink_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A "./"-prefixed archive (as made by `tar -C dir .`) with a symlink."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+
+        tar_filepath = os.path.join(self.tempdir, "dot_prefixed.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            for name in ("./", "./pkg"):
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+
+            data = io.BytesIO(b"data\n")
+            info = tarfile.TarInfo("./pkg/target.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+            info = tarfile.TarInfo("./pkg/link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "target.txt"
+            tar.addfile(info)
+
+        untar_file(tar_filepath, extract_path)
+
+        with open(os.path.join(extract_path, "pkg", "link"), "rb") as f:
+            assert f.read() == b"data\n"
+
+    def test_unpack_tar_symlink_to_implicit_dir_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A symlink to a directory that has no directory entry of its own."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+
+        tar_filepath = os.path.join(self.tempdir, "implicit_dir.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            data = io.BytesIO(b"data\n")
+            info = tarfile.TarInfo("pkg/sub/f.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+            info = tarfile.TarInfo("pkg/link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "sub"
+            tar.addfile(info)
+
+        untar_file(tar_filepath, extract_path)
+
+        # "pkg/" is a common leading directory, which pip strips.
+        with open(os.path.join(extract_path, "link", "f.txt"), "rb") as f:
+            assert f.read() == b"data\n"
+
+    def test_unpack_tar_symlink_to_non_member_no_data_filter(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """A symlink to something that is not in the archive is still refused."""
+        if hasattr(tarfile, "data_filter"):
+            monkeypatch.delattr("tarfile.data_filter")
+
+        tar_filepath = os.path.join(self.tempdir, "non_member.tar")
+        extract_path = os.path.join(self.tempdir, "extract_path")
+
+        with tarfile.open(tar_filepath, "w") as tar:
+            data = io.BytesIO(b"data\n")
+            info = tarfile.TarInfo("pkg/f.txt")
+            info.size = len(data.getbuffer())
+            tar.addfile(info, fileobj=data)
+
+            info = tarfile.TarInfo("pkg/link")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "missing.txt"
+            tar.addfile(info)
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
 
 def test_unpack_tar_unicode(tmpdir: Path) -> None:
     test_tar = tmpdir / "test.tar"
