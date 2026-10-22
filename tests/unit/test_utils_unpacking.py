@@ -12,6 +12,7 @@ import pytest
 
 from pip._internal.exceptions import InstallationError
 from pip._internal.utils.unpacking import (
+    _tar_member_paths,
     is_within_directory,
     unpack_file,
     untar_file,
@@ -209,6 +210,122 @@ class TestUnpackArchives(object):
         assert os.path.islink(link_path)
         assert os.readlink(link_path) == 'target.txt'
 
+    def _make_tar(self, name, entries):
+        path = os.path.join(self.tempdir, name)
+        with tarfile.open(path, 'w') as tar:
+            for member_name, kind, arg in entries:
+                info = tarfile.TarInfo(member_name)
+                if kind == 'dir':
+                    info.type = tarfile.DIRTYPE
+                    tar.addfile(info)
+                elif kind == 'sym':
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = arg
+                    tar.addfile(info)
+                else:
+                    info.size = len(arg)
+                    tar.addfile(info, io.BytesIO(arg))
+        return path
+
+    def test_unpack_tar_dot_prefixed_symlink_success(self):
+        """A "./"-prefixed archive (``tar -C dir .``) with an in-archive
+        symlink is accepted: member names are compared normalized."""
+        test_tar = self._make_tar('dot_prefixed.tar', [
+            ('./', 'dir', None),
+            ('./pkg', 'dir', None),
+            ('./pkg/target.txt', 'file', b'data\n'),
+            ('./pkg/link', 'sym', 'target.txt'),
+        ])
+        out = os.path.join(self.tempdir, 'out')
+        untar_file(test_tar, out)
+        assert os.readlink(os.path.join(out, 'pkg', 'link')) == 'target.txt'
+
+    def test_unpack_tar_symlink_to_implied_dir_success(self):
+        """A symlink to a directory that has no entry of its own (only files
+        beneath it) is accepted: implied parent directories count."""
+        test_tar = self._make_tar('implied_dir.tar', [
+            ('pkg/sub/f.txt', 'file', b'data\n'),
+            ('pkg/link', 'sym', 'sub'),
+        ])
+        out = os.path.join(self.tempdir, 'out')
+        untar_file(test_tar, out)
+        assert os.readlink(os.path.join(out, 'link')) == 'sub'
+
+    def test_unpack_tar_symlink_to_non_member_failure(self):
+        """A symlink to a name that is not in the archive is still refused."""
+        test_tar = self._make_tar('dangling.tar', [
+            ('pkg/a.txt', 'file', b'data\n'),
+            ('pkg/link', 'sym', 'missing.txt'),
+        ])
+        with pytest.raises(InstallationError) as e:
+            untar_file(test_tar, os.path.join(self.tempdir, 'out'))
+        assert 'trying to point outside target directory' in str(e.value)
+
+    def test_unpack_tar_symlink_then_member(self):
+        """Reject a symlink to outside before a member is written through it.
+
+        CVE-2025-8869 follow-up (pypa/pip#14127). Python 2.7 has no
+        ``tarfile.data_filter``, so this check is the only protection.
+        """
+        tar_filepath = os.path.join(self.tempdir, 'symlink_then_member.tar')
+        extract_path = os.path.join(self.tempdir, 'extract_path')
+        outside_path = os.path.join(self.tempdir, 'outside.txt')
+
+        with tarfile.open(tar_filepath, 'w') as tar:
+            info = tarfile.TarInfo('outside_link')
+            info.type = tarfile.SYMTYPE
+            info.linkname = '..'
+            tar.addfile(info)
+
+            data = b'data\n'
+            info = tarfile.TarInfo('outside_link/outside.txt')
+            info.size = len(data)
+            tar.addfile(info, fileobj=io.BytesIO(data))
+
+            info = tarfile.TarInfo('..')
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
+        assert not os.path.exists(outside_path)
+        assert not os.path.exists(os.path.join(extract_path, 'outside_link'))
+
+    def test_unpack_tar_nested_symlink_traversal(self):
+        """Reject a member that escapes through a chain of in-bounds symlinks.
+
+        CVE-2025-8869 follow-up (pypa/pip#14127).
+        """
+        tar_filepath = os.path.join(self.tempdir, 'nested_traversal.tar')
+        extract_path = os.path.join(self.tempdir, 'extract_path')
+        outside_path = os.path.join(self.tempdir, 'outside.txt')
+
+        with tarfile.open(tar_filepath, 'w') as tar:
+            info = tarfile.TarInfo('.')
+            info.type = tarfile.DIRTYPE
+            tar.addfile(info)
+
+            info = tarfile.TarInfo('redir')
+            info.type = tarfile.SYMTYPE
+            info.linkname = '.'
+            tar.addfile(info)
+
+            info = tarfile.TarInfo('redir/up')
+            info.type = tarfile.SYMTYPE
+            info.linkname = '..'
+            tar.addfile(info)
+
+            data = b'data\n'
+            info = tarfile.TarInfo('redir/up/outside.txt')
+            info.size = len(data)
+            tar.addfile(info, fileobj=io.BytesIO(data))
+
+        with pytest.raises(InstallationError):
+            untar_file(tar_filepath, extract_path)
+
+        assert not os.path.exists(outside_path)
+
 
 @pytest.mark.parametrize('args, expected', [
     # Test the second containing the first.
@@ -224,10 +341,33 @@ class TestUnpackArchives(object):
     # CVE-2026-1703: a sibling whose name has the directory as a string
     # prefix must not be considered "within" it.
     (('parent/child', 'parent/childfoo'), False),
+    # A filesystem root contains everything below it.
+    (('/', '/usr/bin/pip'), True),
+    (('/', '/'), True),
 ])
 def test_is_within_directory(args, expected):
     result = is_within_directory(*args)
     assert result == expected
+
+
+@pytest.mark.skipif("sys.platform == 'win32'")
+def test_is_within_directory_doubled_slash_root():
+    # POSIX keeps a leading "//"; the containment check must too.
+    assert is_within_directory('//srv/env/bin', '//srv/env/bin/pip')
+    assert not is_within_directory('//srv/env/bin', '//srv/env/binfoo')
+
+
+def test_is_within_directory_resolve_symlinks(tmpdir):
+    base = str(tmpdir)
+    inside = os.path.join(base, 'inside')
+    os.mkdir(inside)
+    if not hasattr(os, 'symlink'):
+        pytest.skip('os.symlink is unavailable')
+    os.symlink(base, os.path.join(inside, 'up'))
+    target = os.path.join(inside, 'up', 'outside.txt')
+    # Textually inside, but the symlink resolves to the parent.
+    assert is_within_directory(inside, target)
+    assert not is_within_directory(inside, target, resolve_symlinks=True)
 
 
 def _make_tar_zip_polyglot(path):
@@ -283,3 +423,20 @@ def test_unpack_polyglot_ambiguous_rejected(tmpdir):
     _make_tar_zip_polyglot(archive)
     with pytest.raises(InstallationError):
         unpack_file(archive, os.path.join(str(tmpdir), 'out'))
+
+def test_tar_member_paths_terminates_on_doubled_slash():
+    """posixpath.dirname("//") == "//"; collecting parents must not loop."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        data = io.BytesIO(b"x")
+        info = tarfile.TarInfo("//abs/f.txt")
+        info.size = 1
+        tar.addfile(info, fileobj=data)
+    buf.seek(0)
+    tar = tarfile.open(fileobj=buf)
+    try:
+        paths = _tar_member_paths(tar)
+    finally:
+        tar.close()
+    assert "//abs/f.txt" in paths
+    assert "//abs" in paths

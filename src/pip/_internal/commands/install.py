@@ -9,6 +9,7 @@ import site
 from optparse import SUPPRESS_HELP
 
 from pip._vendor import pkg_resources
+from pip._vendor.packaging.requirements import InvalidRequirement, Requirement
 from pip._vendor.packaging.utils import canonicalize_name
 
 from pip._internal.cache import WheelCache
@@ -37,7 +38,7 @@ from pip._internal.wheel_builder import build, should_build_for_install_command
 
 if MYPY_CHECK_RUNNING:
     from optparse import Values
-    from typing import Iterable, List, Optional
+    from typing import Any, Iterable, List, Optional
 
     from pip._internal.models.format_control import FormatControl
     from pip._internal.operations.check import ConflictDetails
@@ -59,6 +60,17 @@ def get_check_binary_allowed(format_control):
         return "binary" in allowed_formats
 
     return check_binary_allowed
+
+
+def _arg_refers_to_pip(arg):
+    # type: (str) -> bool
+    try:
+        req = Requirement(arg)
+    except (InvalidRequirement, ValueError):
+        # A malformed requirement (e.g. a URL that urlparse rejects with
+        # ValueError) is not pip; leave the error to the normal parsing path.
+        return False
+    return canonicalize_name(req.name) == "pip"
 
 
 class InstallCommand(RequirementCommand):
@@ -224,6 +236,17 @@ class InstallCommand(RequirementCommand):
 
         self.parser.insert_option_group(0, index_opts)
         self.parser.insert_option_group(0, self.cmd_opts)
+
+    def _pip_version_check_fetch(self, options, args):
+        # type: (Values, List[str]) -> Any
+        # Skip the self-version check when pip itself is a requirement. The
+        # running pip may be replaced mid-command, and the upgrade prompt
+        # is redundant.
+        if any(_arg_refers_to_pip(arg) for arg in args):
+            return None
+        return super(InstallCommand, self)._pip_version_check_fetch(
+            options, args
+        )
 
     @with_cleanup
     def run(self, options, args):

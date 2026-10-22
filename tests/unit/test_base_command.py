@@ -96,6 +96,64 @@ def test_handle_pip_version_check_called(mock_handle_version_check):
     mock_handle_version_check.assert_called_once()
 
 
+def test_version_check_fetch_before_run_emit_after(monkeypatch):
+    """
+    CVE-2026-6357: _main() fetches for the version check before the command
+    body and reports after it.
+    """
+    events = []
+
+    def fetch(self, options, args):
+        events.append('fetch')
+        return 'fetched'
+
+    def emit(self, options, fetched):
+        events.append(('emit', fetched))
+
+    monkeypatch.setattr(Command, '_pip_version_check_fetch', fetch)
+    monkeypatch.setattr(Command, '_pip_version_check_emit', emit)
+
+    def run_func():
+        events.append('run')
+        return SUCCESS
+
+    cmd = FakeCommand(run_func=run_func)
+    assert cmd.main([]) == SUCCESS
+    assert events == ['fetch', 'run', ('emit', 'fetched')]
+
+
+@pytest.mark.parametrize('exc, message', [
+    (KeyboardInterrupt, 'Operation cancelled by user'),
+    (ValueError, 'Exception:'),
+])
+def test_version_check_fetch_errors_are_handled(
+    monkeypatch, capsys, exc, message
+):
+    """
+    The pre-command version-check fetch runs inside _main()'s error
+    handling, so Ctrl-C or an unexpected error during it is reported by pip
+    instead of escaping as a raw traceback.
+    """
+    emitted = []
+
+    def fetch(self, options, args):
+        raise exc()
+
+    def emit(self, options, fetched):
+        emitted.append(fetched)
+
+    monkeypatch.setattr(Command, '_pip_version_check_fetch', fetch)
+    monkeypatch.setattr(Command, '_pip_version_check_emit', emit)
+
+    cmd = FakeCommand(run_func=lambda: pytest.fail('run() must not be called'))
+    status = cmd.main([])
+    assert status != SUCCESS
+    stderr = capsys.readouterr().err
+    assert message in stderr
+    # The emit step still runs (with nothing fetched).
+    assert emitted == [None]
+
+
 def test_log_command_success(fixed_time, tmpdir):
     """Test the --log option logs when command succeeds."""
     cmd = FakeCommand()

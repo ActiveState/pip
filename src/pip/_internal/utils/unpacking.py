@@ -5,6 +5,7 @@ from __future__ import absolute_import
 
 import logging
 import os
+import posixpath
 import shutil
 import stat
 import tarfile
@@ -21,7 +22,7 @@ from pip._internal.utils.misc import ensure_dir
 from pip._internal.utils.typing import MYPY_CHECK_RUNNING
 
 if MYPY_CHECK_RUNNING:
-    from typing import Iterable, List, Optional, Text, Union
+    from typing import Iterable, List, Optional, Set, Text, Union
     from zipfile import ZipInfo
 
 
@@ -84,41 +85,72 @@ def has_leading_dir(paths):
     return True
 
 
-def is_within_directory(directory, target):
-    # type: ((Union[str, Text]), (Union[str, Text])) -> bool
+def is_within_directory(directory, target, resolve_symlinks=False):
+    # type: ((Union[str, Text]), (Union[str, Text]), bool) -> bool
     """
     Return true if the absolute path of target is within the directory
+    (including when target is equal to the directory).
+
+    When ``resolve_symlinks`` is true, resolve symlinks before comparing so
+    traversal through a symlink (e.g. "link/../file") is also caught.
     """
-    abs_directory = os.path.abspath(directory)
-    abs_target = os.path.abspath(target)
+    if resolve_symlinks:
+        abs_directory = os.path.realpath(directory)
+        abs_target = os.path.realpath(target)
+    else:
+        abs_directory = os.path.abspath(directory)
+        abs_target = os.path.abspath(target)
 
     # NOTE: os.path.commonprefix compares character-by-character, so it treats
     #       "/a/parent" and "/a/parentfoo" as sharing the prefix "/a/parent"
     #       and would report the latter as "within" the former (CVE-2026-1703).
     #       os.path.commonpath compares on path components but is unavailable on
-    #       Python 2.7, so enforce a component boundary explicitly instead.
-    return abs_target == abs_directory or abs_target.startswith(
-        abs_directory + os.sep
-    )
+    #       Python 2.7 (and drops a POSIX "//" prefix), so enforce a component
+    #       boundary explicitly instead.
+    if abs_target == abs_directory:
+        return True
+    # A filesystem root ("/" or "C:\\") already ends with a separator;
+    # appending another would reject everything.
+    if abs_directory.endswith(os.sep):
+        prefix = abs_directory
+    else:
+        prefix = abs_directory + os.sep
+    return abs_target.startswith(prefix)
 
 
-def is_symlink_target_in_tar(tar, tarinfo):
-    # type: (tarfile.TarFile, tarfile.TarInfo) -> bool
+def _tar_member_paths(tar):
+    # type: (tarfile.TarFile) -> Set[str]
+    """Normalized member paths plus every implied parent directory."""
+    paths = set()  # type: Set[str]
+    for member in tar.getmembers():
+        name = posixpath.normpath(member.name.replace("\\", "/"))
+        while name not in ("", ".", "/"):
+            paths.add(name)
+            parent = posixpath.dirname(name)
+            if parent == name:
+                # posixpath.dirname("//") == "//": stop at any fixed point.
+                break
+            name = parent
+    return paths
+
+
+def is_symlink_target_in_tar(tar, tarinfo, member_paths=None):
+    # type: (tarfile.TarFile, tarfile.TarInfo, Optional[Set[str]]) -> bool
     """
     Return true if the file the symlink member points to is itself a member
     of the same tar archive, i.e. the symlink does not escape the archive to
     reference an arbitrary path on the host filesystem (CVE-2025-8869).
+
+    Member names are compared after normalization, and directories implied
+    by a member's path count as members, so "./"-prefixed archives and links
+    to a directory without its own entry are accepted. Containment itself is
+    enforced by the realpath checks in untar_file().
     """
     linkname = os.path.join(os.path.dirname(tarinfo.name), tarinfo.linkname)
-
-    linkname = os.path.normpath(linkname)
-    linkname = linkname.replace("\\", "/")
-
-    try:
-        tar.getmember(linkname)
-        return True
-    except KeyError:
-        return False
+    linkname = posixpath.normpath(linkname.replace("\\", "/"))
+    if member_paths is None:
+        member_paths = _tar_member_paths(tar)
+    return linkname in member_paths
 
 
 def set_extracted_file_to_default_mode_plus_executable(path):
@@ -214,13 +246,21 @@ def untar_file(filename, location):
         leading = has_leading_dir([
             member.name for member in tar.getmembers()
         ])
+        # Computed once: is_symlink_target_in_tar() would otherwise rebuild
+        # it for every symlink member.
+        member_paths = _tar_member_paths(tar)
         for member in tar.getmembers():
             fn = member.name
             if leading:
                 # https://github.com/python/mypy/issues/1174
                 fn = split_leading_dir(fn)[1]  # type: ignore
             path = os.path.join(location, fn)
-            if not is_within_directory(location, path):
+            # The plain check rejects textual ".." escapes; resolving symlinks
+            # also catches a later member redirected outside by an earlier
+            # member's symlink (e.g. "link/../file").
+            if not is_within_directory(location, path) or (
+                not is_within_directory(location, path, resolve_symlinks=True)
+            ):
                 message = (
                     'The tar file ({}) has a file ({}) trying to install '
                     'outside target directory ({})'
@@ -231,7 +271,22 @@ def untar_file(filename, location):
             if member.isdir():
                 ensure_dir(path)
             elif member.issym():
-                if not is_symlink_target_in_tar(tar, member):
+                # Reject symlinks resolving outside the destination, so a
+                # later member cannot be written through them.
+                link_target = os.path.join(
+                    os.path.dirname(path), member.linkname
+                )
+                if not is_within_directory(
+                    location, link_target, resolve_symlinks=True
+                ):
+                    message = (
+                        'The tar file ({}) has a link ({}) trying to point '
+                        'outside target directory ({})'
+                    )
+                    raise InstallationError(
+                        message.format(filename, member.name, member.linkname)
+                    )
+                if not is_symlink_target_in_tar(tar, member, member_paths):
                     message = (
                         'The tar file ({}) has a link ({}) trying to point '
                         'outside target directory ({})'

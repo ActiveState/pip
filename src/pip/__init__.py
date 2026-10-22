@@ -4,7 +4,7 @@ if MYPY_CHECK_RUNNING:
     from typing import List, Optional
 
 
-__version__ = "20.3.4.post2"
+__version__ = "20.3.4.post3"
 
 
 def main(args=None):

@@ -3,6 +3,7 @@ import posixpath
 
 import pytest
 
+from pip._internal.exceptions import InstallationError, UnsafeFilenameError
 from pip._internal.models.link import (
     Link,
     as_path_component,
@@ -240,3 +241,16 @@ def test_join_within_directory_rejects_non_component(component):
     # its argument itself instead of trusting the caller.
     with pytest.raises(ValueError):
         join_within_directory('downloads', component)
+
+
+@pytest.mark.parametrize('call', [
+    lambda: as_path_component('..'),
+    lambda: join_within_directory('downloads', '..'),
+])
+def test_unsafe_filename_is_a_pip_installation_error(call):
+    # Reported by pip's command loop as an "ERROR:" line, not a traceback,
+    # while staying a ValueError for existing callers.
+    with pytest.raises(UnsafeFilenameError) as e:
+        call()
+    assert isinstance(e.value, InstallationError)
+    assert isinstance(e.value, ValueError)

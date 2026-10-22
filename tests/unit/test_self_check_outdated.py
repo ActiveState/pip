@@ -11,6 +11,8 @@ from pip._internal import self_outdated_check
 from pip._internal.models.candidate import InstallationCandidate
 from pip._internal.self_outdated_check import (
     SelfCheckState,
+    _pip_self_version_check_emit,
+    _pip_self_version_check_fetch,
     logger,
     pip_self_version_check,
 )
@@ -137,6 +139,76 @@ def test_pip_self_version_check(monkeypatch, stored_time, installed_ver,
         assert len(logger.warning.calls) == 1
     else:
         assert len(logger.warning.calls) == 0
+
+
+def _patch_upgrade_available(monkeypatch):
+    monkeypatch.setattr(self_outdated_check, 'get_installed_version',
+                        lambda name: '1.0')
+    monkeypatch.setattr(self_outdated_check, 'PackageFinder',
+                        MockPackageFinder)
+    monkeypatch.setattr(self_outdated_check, 'get_distribution',
+                        lambda name: MockDistribution('pip'))
+    monkeypatch.setattr(logger, 'warning',
+                        pretend.call_recorder(lambda *a, **kw: None))
+    fake_state = pretend.stub(
+        state={},
+        save=pretend.call_recorder(lambda v, t: None),
+    )
+    monkeypatch.setattr(
+        self_outdated_check, 'SelfCheckState', lambda **kw: fake_state
+    )
+
+
+def test_self_version_check_fetch_does_not_log(monkeypatch):
+    # CVE-2026-6357: the fetch half runs before the command body, the emit
+    # half only reports afterwards.
+    _patch_upgrade_available(monkeypatch)
+
+    prompt = _pip_self_version_check_fetch(None, _options())
+
+    assert prompt == ('1.0', '6.9.0')
+    assert logger.warning.calls == []
+
+
+def test_self_version_check_emit_does_no_lookups(monkeypatch):
+    # The emit half runs after `pip install`; it must not query the index,
+    # compute tags or inspect installed distributions (CVE-2026-6357).
+    def fail(*args, **kwargs):
+        raise AssertionError("lookup after the command body")
+
+    monkeypatch.setattr(self_outdated_check, 'get_installed_version', fail)
+    monkeypatch.setattr(self_outdated_check, 'get_distribution', fail)
+    monkeypatch.setattr(self_outdated_check, 'PackageFinder',
+                        pretend.stub(create=fail))
+    monkeypatch.setattr(self_outdated_check, 'SelfCheckState', fail)
+    monkeypatch.setattr(logger, 'warning',
+                        pretend.call_recorder(lambda *a, **kw: None))
+
+    _pip_self_version_check_emit(('1.0', '6.9.0'))
+
+    assert len(logger.warning.calls) == 1
+    assert logger.warning.calls[0].args[1:3] == ('1.0', '6.9.0')
+
+
+def test_self_version_check_emit_none_is_silent(monkeypatch):
+    monkeypatch.setattr(logger, 'warning',
+                        pretend.call_recorder(lambda *a, **kw: None))
+    _pip_self_version_check_emit(None)
+    assert logger.warning.calls == []
+
+
+def test_self_version_check_fetch_swallows_errors(monkeypatch):
+    _patch_upgrade_available(monkeypatch)
+
+    def broken(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(self_outdated_check, 'SelfCheckState', broken)
+    monkeypatch.setattr(logger, 'debug',
+                        pretend.call_recorder(lambda *a, **kw: None))
+
+    assert _pip_self_version_check_fetch(None, _options()) is None
+    assert len(logger.debug.calls) == 1
 
 
 statefile_name_case_1 = (

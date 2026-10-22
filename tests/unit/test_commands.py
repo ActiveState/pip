@@ -6,7 +6,9 @@ from pip._internal.cli.req_command import (
     RequirementCommand,
     SessionCommandMixin,
 )
+from pip._internal.cli.status_codes import SUCCESS
 from pip._internal.commands import commands_dict, create_command
+from pip._internal.commands.install import _arg_refers_to_pip
 
 # These are the expected names of the commands whose classes inherit from
 # IndexGroupCommand.
@@ -111,3 +113,111 @@ def test_requirement_commands():
         return isinstance(command, RequirementCommand)
 
     check_commands(is_requirement_command, ['download', 'install', 'wheel'])
+
+
+@pytest.mark.parametrize('command_name', EXPECTED_INDEX_GROUP_COMMANDS)
+def test_index_group_version_check_runs_before_command_body(
+    monkeypatch, command_name,
+):
+    """
+    CVE-2026-6357: the self-version check must do its lookups before the
+    command body (which may install packages) and only report afterwards.
+    Run after `pip install`, the lookup computes supported tags, which
+    probes ``import _manylinux`` and could execute a just-installed module.
+    """
+    # The isolate fixture disables the check through the environment.
+    monkeypatch.delenv('PIP_DISABLE_PIP_VERSION_CHECK', raising=False)
+    events = []
+    fetched = object()
+
+    def fake_fetch(session, options):
+        events.append('fetch')
+        return fetched
+
+    def fake_emit(prompt):
+        events.append(('emit', prompt is fetched))
+
+    def fake_full_check(session, options):
+        events.append('full-check')
+
+    monkeypatch.setattr(
+        'pip._internal.cli.req_command._pip_self_version_check_fetch',
+        fake_fetch,
+    )
+    monkeypatch.setattr(
+        'pip._internal.cli.req_command._pip_self_version_check_emit',
+        fake_emit,
+    )
+    monkeypatch.setattr(
+        'pip._internal.cli.req_command.pip_self_version_check',
+        fake_full_check,
+    )
+
+    command = create_command(command_name)
+
+    def fake_run(options, args):
+        events.append('run')
+        return SUCCESS
+
+    monkeypatch.setattr(command, 'run', fake_run)
+
+    assert command.main([]) == SUCCESS
+    assert events == ['fetch', 'run', ('emit', True)]
+
+
+@pytest.mark.parametrize('command_name', EXPECTED_INDEX_GROUP_COMMANDS)
+@pytest.mark.parametrize('extra_args', [
+    ['--disable-pip-version-check'],
+    ['--no-index'],
+])
+def test_index_group_version_check_disabled(
+    monkeypatch, command_name, extra_args,
+):
+    events = []
+    monkeypatch.setattr(
+        'pip._internal.cli.req_command._pip_self_version_check_fetch',
+        lambda session, options: events.append('fetch'),
+    )
+    monkeypatch.setattr(
+        'pip._internal.cli.req_command._pip_self_version_check_emit',
+        lambda prompt: events.append(('emit', prompt)),
+    )
+    command = create_command(command_name)
+    monkeypatch.setattr(command, 'run', lambda options, args: SUCCESS)
+
+    assert command.main(extra_args) == SUCCESS
+    assert events == [('emit', None)]
+
+
+@pytest.mark.parametrize('arg, expected', [
+    ('pip', True),
+    ('PIP==20.3.4', True),
+    ('pip>=20', True),
+    ('pip[foo]', True),
+    ('pipx', False),
+    ('six', False),
+    ('./pip-20.3.4-py2.py3-none-any.whl', False),
+    ('-r', False),
+    # urlparse raises ValueError for this URL; it is simply not pip.
+    ('foo @ http://[bad/x', False),
+])
+def test_arg_refers_to_pip(arg, expected):
+    assert _arg_refers_to_pip(arg) is expected
+
+
+def test_install_skips_version_check_when_installing_pip(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        'pip._internal.cli.req_command._pip_self_version_check_fetch',
+        lambda session, options: calls.append('fetch'),
+    )
+    command = create_command('install')
+    options = command.parser.get_default_values()
+    options.disable_pip_version_check = False
+    options.no_index = False
+
+    assert command._pip_version_check_fetch(options, ['pip']) is None
+    assert calls == []
+
+    command._pip_version_check_fetch(options, ['six'])
+    assert calls == ['fetch']

@@ -52,7 +52,7 @@ def test_rev_options_repr():
     # First check VCS-specific RevOptions behavior.
     (Bazaar, [], ['-r', '123'], {}),
     (Git, ['HEAD'], ['123'], {}),
-    (Mercurial, [], ['-r=123'], {}),
+    (Mercurial, [], ['--rev=123'], {}),
     (Subversion, [], ['-r', '123'], {}),
     # Test extra_args.  For this, test using a single VersionControl class.
     (Git, ['HEAD', 'opt1', 'opt2'], ['123', 'opt1', 'opt2'],
@@ -228,14 +228,25 @@ def test_git_get_revision_sha_unicode_separator(run_command_mock):
 def test_mercurial_rev_not_interpreted_as_option():
     """
     CVE-2023-5752: a malicious hg revision (e.g. ``--config=...``) must be
-    passed as a single ``-r=<rev>`` token so hg cannot parse it as an option.
+    passed as a single ``--rev=<rev>`` token so hg cannot parse it as an
+    option.
     """
     rev = '--config=alias.update=!touch owned'
     args = Mercurial.get_base_rev_args(rev)
-    assert args == ['-r={}'.format(rev)]
-    # A single token means hg treats the whole thing as the value of -r.
+    assert args == ['--rev={}'.format(rev)]
+    # A single token means hg treats the whole thing as the value of --rev.
     assert len(args) == 1
-    assert args[0].startswith('-r=')
+    assert args[0].startswith('--rev=')
+
+
+def test_mercurial_rev_uses_long_option():
+    """
+    hg parses ``-r=<rev>`` as the revision ``=<rev>`` and fails, so the
+    revision must be passed with the long ``--rev=`` form (pypa/pip#12373).
+    """
+    args = Mercurial.get_base_rev_args('0')
+    assert args == ['--rev=0']
+    assert not args[0].startswith('-r')
 
 
 # The non-SVN backends all use the same get_netloc_and_auth(), so only test

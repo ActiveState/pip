@@ -4,6 +4,7 @@ import re
 
 from pip._vendor.six.moves.urllib import parse as urllib_parse
 
+from pip._internal.exceptions import UnsafeFilenameError
 from pip._internal.utils.filetypes import WHEEL_EXTENSION
 from pip._internal.utils.misc import (
     redact_auth_from_url,
@@ -44,7 +45,7 @@ def as_path_component(name):
     """
     component = _to_path_component(name)
     if not component:
-        raise ValueError(
+        raise UnsafeFilenameError(
             "Unexpected file name derived from URL: {!r}".format(name)
         )
 
@@ -61,7 +62,7 @@ def join_within_directory(directory, component):
     has no runtime type to enforce that, so it is checked here instead.
     """
     if not component or component != _to_path_component(component):
-        raise ValueError(
+        raise UnsafeFilenameError(
             "Not a single path component: {!r}".format(component)
         )
 
