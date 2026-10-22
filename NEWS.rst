@@ -34,13 +34,38 @@ Security Fixes
 - **GHSA-6q48-6c7w-9gw2**: Upgrade vendored certifi from 2026.1.4 to
   2026.10.19 (the release vendored by pip 26.2.2), dropping the emSign ECC
   Root CA - G3, whose intermediate CA keys were compromised. (`GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_)
+- **CVE-2025-8869**: Harden the tar extraction fallback (used when
+  ``tarfile.data_filter`` is unavailable, i.e. Python 3.9.0-3.9.16), porting
+  pypa/pip#14127: members are also checked after resolving symlinks, and a
+  symlink that resolves outside the destination is rejected before it is
+  created. Previously a symlink to ``.`` or ``..`` let a later member be
+  written outside the extract directory. (`GHSA-4xh5-x5gv-qwph <https://github.com/advisories/GHSA-4xh5-x5gv-qwph>`_)
 
-.. note
+Bug Fixes
+---------
+
+- ``is_within_directory`` no longer uses ``os.path.commonpath``, so installs
+  under a POSIX ``//``-prefixed path (e.g. ``--prefix //tmp/x``) work again,
+  and a directory at a filesystem root (``/`` or ``C:\``) is handled; a
+  target on another Windows drive is reported as outside instead of raising.
+- A scripts directory at a filesystem root no longer rejects every console
+  or GUI script (the CVE-2026-8643 check now uses ``is_within_directory``).
+- The tar fallback's symlink check compares normalized member names, so
+  ``./``-prefixed archives and links to a directory that has no entry of its
+  own unpack again; containment is still enforced by the symlink-resolving
+  checks above.
+- An unsafe download file name (e.g. ``Content-Disposition: filename=".."``)
+  is reported as a pip ``ERROR:`` instead of a ``ValueError`` traceback.
+- The ``pip install pip`` detection used by the self-version check no longer
+  fails on a requirement that makes packaging raise a bare ``ValueError``.
+
+.. note::
 
    CVE-2026-1703 / GHSA-6vgw-5pg2-w6jp (``is_within_directory`` prefix
-   comparison) and CVE-2025-8869 / GHSA-4xh5-x5gv-qwph (tar symlink targets
-   on the extraction fallback) were already fixed upstream before pip
-   26.0.1.
+   comparison) was already fixed upstream before pip 26.0.1.
+   CVE-2025-8869 / GHSA-4xh5-x5gv-qwph (tar symlink targets on the
+   extraction fallback) was fixed in 26.0.1 and is hardened in this release
+   (see above).
 
    This is an ActiveState security release for Python 3.9, the last Python
    version pip 26.0.x supports (pip 26.1 requires Python 3.10). It uses the
