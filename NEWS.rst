@@ -34,12 +34,14 @@ Security Fixes
   - **CVE-2025-50181**: ``retries`` at the ``PoolManager`` level did not
     limit redirects. (`GHSA-pq67-6m6q-mj2v <https://github.com/advisories/GHSA-pq67-6m6q-mj2v>`_)
 
-- **CVE-2026-25645**: Backport the requests 2.33.0 fix to the vendored
-  requests 2.32.5. ``requests.utils.extract_zipped_paths()``, which
-  requests uses for a CA bundle inside a zip archive (for example when pip
-  runs from a zipapp), extracted to a predictable file name in the shared
-  temporary directory and reused an existing file there. It now extracts to
-  a new ``mkstemp`` file. (`GHSA-gc5v-m9x4-r6x2 <https://github.com/advisories/GHSA-gc5v-m9x4-r6x2>`_)
+- **CVE-2026-25645**: Backport the requests 2.33.0 fixes to the vendored
+  requests 2.32.5. ``requests.utils.extract_zipped_paths()`` extracted a
+  zip member to a predictable file name in the shared temporary directory
+  and reused an existing file there; it now extracts to a new ``mkstemp``
+  file. ``HTTPAdapter.cert_verify()`` no longer calls it for the default CA
+  bundle (pip's vendored certifi already extracts its bundle to a real
+  file), as in upstream requests. pip did not reach the vulnerable path;
+  the fix is defense in depth. (`GHSA-gc5v-m9x4-r6x2 <https://github.com/advisories/GHSA-gc5v-m9x4-r6x2>`_)
 
 26.0.1.post2 (2026-10-28)
 =========================
