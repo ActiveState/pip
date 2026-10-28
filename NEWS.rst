@@ -9,6 +9,40 @@
 
 .. towncrier release notes start
 
+26.0.1.post3 (2026-10-28)
+=========================
+
+ActiveState security release for the Python 3.9-compatible pip 26.0.1 line.
+
+Security Fixes
+--------------
+
+- Upgrade vendored urllib3 from 1.26.20 to 1.26.20.post4, ActiveState's
+  security release of urllib3 1.26.20, with pip's usual vendoring changes
+  (Brotli support disabled). It fixes:
+
+  - **CVE-2025-66418**: unbounded ``Content-Encoding`` decoder chain. (`GHSA-gm62-xv2j-4w53 <https://github.com/advisories/GHSA-gm62-xv2j-4w53>`_)
+  - **CVE-2025-66471**: the streaming API fully decompressed highly
+    compressed data in one operation. (`GHSA-2xpw-w6gg-jr37 <https://github.com/advisories/GHSA-2xpw-w6gg-jr37>`_)
+  - **CVE-2026-21441**: redirect bodies were decompressed while draining. (`GHSA-38jv-5279-wg99 <https://github.com/advisories/GHSA-38jv-5279-wg99>`_)
+  - **CVE-2026-44431**: sensitive headers were forwarded on cross-origin
+    redirects. (`GHSA-qccp-gfcp-xxvc <https://github.com/advisories/GHSA-qccp-gfcp-xxvc>`_)
+  - **CVE-2026-97687**: the TLS connection to an HTTPS proxy used the
+    target's TLS settings. (`GHSA-8988-9cw3-xx77 <https://github.com/advisories/GHSA-8988-9cw3-xx77>`_)
+  - **CVE-2026-97689**: chunk-size and trailer lines were read without a
+    length limit. (`GHSA-vxq7-64xx-v4gw <https://github.com/advisories/GHSA-vxq7-64xx-v4gw>`_)
+  - **CVE-2025-50181**: ``retries`` at the ``PoolManager`` level did not
+    limit redirects. (`GHSA-pq67-6m6q-mj2v <https://github.com/advisories/GHSA-pq67-6m6q-mj2v>`_)
+
+- **CVE-2026-25645**: Backport the requests 2.33.0 fixes to the vendored
+  requests 2.32.5. ``requests.utils.extract_zipped_paths()`` extracted a
+  zip member to a predictable file name in the shared temporary directory
+  and reused an existing file there; it now extracts to a new ``mkstemp``
+  file. ``HTTPAdapter.cert_verify()`` no longer calls it for the default CA
+  bundle (pip's vendored certifi already extracts its bundle to a real
+  file), as in upstream requests. pip did not reach the vulnerable path;
+  the fix is defense in depth. (`GHSA-gc5v-m9x4-r6x2 <https://github.com/advisories/GHSA-gc5v-m9x4-r6x2>`_)
+
 26.0.1.post2 (2026-10-28)
 =========================
 
