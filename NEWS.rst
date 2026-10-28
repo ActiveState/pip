@@ -9,6 +9,21 @@
 
 .. towncrier release notes start
 
+24.0.post3 (2026-10-28)
+=======================
+
+ActiveState security release for the Python 3.7-compatible pip 24.0 line.
+
+Security Fixes
+--------------
+
+- **GHSA-6q48-6c7w-9gw2** (follow-up): Upgrade vendored certifi from
+  2026.10.19 to 2026.10.23, which also removes the
+  emSign Root CA - C1 and emSign ECC Root CA - C3 roots, from the same
+  eMudhra/emSign CA key compromise as emSign ECC Root CA - G3 (removed in
+  the previous release). emSign Root CA - G1 is now the only emSign root in
+  the bundle. (`GHSA-6q48-6c7w-9gw2 <https://github.com/advisories/GHSA-6q48-6c7w-9gw2>`_)
+
 24.0.post2 (2026-10-21)
 =======================
 
