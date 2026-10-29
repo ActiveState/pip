@@ -60,6 +60,7 @@ from .structures import CaseInsensitiveDict
 
 NETRC_FILES = (".netrc", "_netrc")
 
+# Certificate is extracted by certifi when needed.
 DEFAULT_CA_BUNDLE_PATH = certs.where()
 
 DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -229,12 +230,7 @@ def get_netrc_auth(url, raise_errors=False):
 
         ri = urlparse(url)
 
-        # Strip port numbers from netloc. This weird `if...encode`` dance is
-        # used for Python 3.2, which doesn't support unicode literals.
-        splitstr = b":"
-        if isinstance(url, str):
-            splitstr = splitstr.decode("ascii")
-        host = ri.netloc.split(splitstr)[0]
+        host = ri.hostname
 
         try:
             _netrc = netrc(netrc_path).authenticators(host)
@@ -288,12 +284,13 @@ def extract_zipped_paths(path):
         return path
 
     # we have a valid zip archive and a valid member of that archive
-    tmp = tempfile.gettempdir()
-    extracted_path = os.path.join(tmp, member.split("/")[-1])
-    if not os.path.exists(extracted_path):
-        # use read + write to avoid the creating nested folders, we only want the file, avoids mkdir racing condition
-        with atomic_open(extracted_path) as file_handler:
-            file_handler.write(zip_file.read(member))
+    suffix = os.path.splitext(member.split("/")[-1])[-1]
+    fd, extracted_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        os.write(fd, zip_file.read(member))
+    finally:
+        os.close(fd)
+
     return extracted_path
 
 
