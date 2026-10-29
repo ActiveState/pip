@@ -68,7 +68,7 @@ port_by_scheme = {"http": 80, "https": 443}
 
 # When it comes time to update this value as a part of regular maintenance
 # (ie test_recent_date is failing) update it to ~6 months before the current date.
-RECENT_DATE = datetime.date(2022, 1, 1)
+RECENT_DATE = datetime.date(2024, 1, 1)
 
 _CONTAINS_CONTROL_CHAR_RE = re.compile(r"[^-!#$%&'*+.^_`|~0-9a-zA-Z]")
 
@@ -364,6 +364,15 @@ class HTTPSConnection(HTTPConnection):
         hostname = self.host
         tls_in_tls = False
 
+        if self._is_forwarding_through_https_proxy():
+            # The TLS connection being made is the one to the HTTPS proxy,
+            # which forwards requests without a CONNECT tunnel. It must use
+            # the proxy's TLS policy: never the target's SNI, hostname or
+            # fingerprint assertions, client certificate, or a cert_reqs
+            # that would override proxy_ssl_context's verify_mode.
+            self.sock, self.is_verified = self._wrap_proxy_socket(self.host, conn)
+            return
+
         if self._is_using_tunnel():
             if self.tls_in_tls_required:
                 self.sock = conn = self._connect_tls_proxy(hostname, conn)
@@ -437,7 +446,7 @@ class HTTPSConnection(HTTPConnection):
             and self.ssl_version is None
             and hasattr(self.sock, "version")
             and self.sock.version() in {"TLSv1", "TLSv1.1"}
-        ):
+        ):  # Defensive:
             warnings.warn(
                 "Negotiating TLSv1/TLSv1.1 by default is deprecated "
                 "and will be disabled in urllib3 v2.0.0. Connecting to "
@@ -476,28 +485,60 @@ class HTTPSConnection(HTTPConnection):
             or self.assert_fingerprint is not None
         )
 
+    def _is_forwarding_through_https_proxy(self):
+        return (
+            self.proxy is not None
+            and self.proxy.scheme == "https"
+            and not self._is_using_tunnel()
+        )
+
     def _connect_tls_proxy(self, hostname, conn):
         """
-        Establish a TLS connection to the proxy using the provided SSL context.
+        Establish a TLS connection to the proxy using proxy-specific policy.
+        """
+        socket, verified = self._wrap_proxy_socket(hostname, conn)
+        if verified is not None:
+            self.proxy_is_verified = verified
+        return socket
+
+    def _wrap_proxy_socket(self, hostname, conn):
+        """
+        Wrap ``conn`` in TLS to the proxy at ``hostname``.
+
+        Returns the socket and whether the proxy's certificate was verified,
+        or None for a user-provided proxy context (left for the context to
+        report, as before).
         """
         proxy_config = self.proxy_config
         ssl_context = proxy_config.ssl_context
         if ssl_context:
             # If the user provided a proxy context, we assume CA and client
-            # certificates have already been set
-            return ssl_wrap_socket(
+            # certificates have already been set. Its verification policy is
+            # used as-is.
+            socket = ssl_wrap_socket(
                 sock=conn,
                 server_hostname=hostname,
                 ssl_context=ssl_context,
             )
+            if self._is_forwarding_through_https_proxy():
+                return socket, ssl_context.verify_mode == ssl.CERT_REQUIRED
+            return socket, None
 
-        ssl_context = create_proxy_ssl_context(
-            self.ssl_version,
-            self.cert_reqs,
-            self.ca_certs,
-            self.ca_cert_dir,
-            self.ca_cert_data,
-        )
+        if self._is_forwarding_through_https_proxy() and self.ssl_context is not None:
+            # Forwarding with no proxy_ssl_context: for backwards
+            # compatibility the connection's ssl_context, with the pool's
+            # certificate policy, is used for the proxy handshake, as it was
+            # before proxy and target TLS settings were separated.
+            ssl_context = self.ssl_context
+            ssl_context.verify_mode = resolve_cert_reqs(self.cert_reqs)
+        else:
+            ssl_context = create_proxy_ssl_context(
+                self.ssl_version,
+                self.cert_reqs,
+                self.ca_certs,
+                self.ca_cert_dir,
+                self.ca_cert_data,
+            )
 
         # If no cert was provided, use only the default options for server
         # certificate validation
@@ -529,8 +570,7 @@ class HTTPSConnection(HTTPConnection):
                 )
             _match_hostname(cert, hostname)
 
-        self.proxy_is_verified = ssl_context.verify_mode == ssl.CERT_REQUIRED
-        return socket
+        return socket, ssl_context.verify_mode == ssl.CERT_REQUIRED
 
 
 def _match_hostname(cert, asserted_hostname):

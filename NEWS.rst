@@ -9,6 +9,57 @@
 
 .. towncrier release notes start
 
+24.0.post4 (2026-10-29)
+=======================
+
+ActiveState security release for the Python 3.7-compatible pip 24.0 line.
+
+Security Fixes
+--------------
+
+- Upgrade vendored urllib3 from 1.26.17 to 1.26.20.post4, ActiveState's
+  security release of urllib3 1.26.20, with pip's usual vendoring changes
+  (Brotli support disabled). This is the same vendored urllib3 as pip
+  26.0.1.post3. It fixes:
+
+  - **CVE-2023-45803**: request bodies were not removed when a redirect
+    turned the request into a GET (fixed upstream in 1.26.18). (`GHSA-g4mx-q9vg-27p4 <https://github.com/advisories/GHSA-g4mx-q9vg-27p4>`_)
+  - **CVE-2024-37891**: the ``Proxy-Authorization`` header was kept on
+    cross-origin redirects (fixed upstream in 1.26.19). (`GHSA-34jh-p97f-mpxf <https://github.com/advisories/GHSA-34jh-p97f-mpxf>`_)
+  - **CVE-2025-66418**: unbounded ``Content-Encoding`` decoder chain. (`GHSA-gm62-xv2j-4w53 <https://github.com/advisories/GHSA-gm62-xv2j-4w53>`_)
+  - **CVE-2025-66471**: the streaming API fully decompressed highly
+    compressed data in one operation. (`GHSA-2xpw-w6gg-jr37 <https://github.com/advisories/GHSA-2xpw-w6gg-jr37>`_)
+  - **CVE-2026-21441**: redirect bodies were decompressed while draining. (`GHSA-38jv-5279-wg99 <https://github.com/advisories/GHSA-38jv-5279-wg99>`_)
+  - **CVE-2026-44431**: sensitive headers were forwarded on cross-origin
+    redirects. (`GHSA-qccp-gfcp-xxvc <https://github.com/advisories/GHSA-qccp-gfcp-xxvc>`_)
+  - **CVE-2026-97687**: the TLS connection to an HTTPS proxy used the
+    target's TLS settings. (`GHSA-8988-9cw3-xx77 <https://github.com/advisories/GHSA-8988-9cw3-xx77>`_)
+  - **CVE-2026-97689**: chunk-size and trailer lines were read without a
+    length limit. (`GHSA-vxq7-64xx-v4gw <https://github.com/advisories/GHSA-vxq7-64xx-v4gw>`_)
+  - **CVE-2025-50181**: ``retries`` at the ``PoolManager`` level did not
+    limit redirects. (`GHSA-pq67-6m6q-mj2v <https://github.com/advisories/GHSA-pq67-6m6q-mj2v>`_)
+
+- **CVE-2024-47081**: Backport the requests 2.32.4 fix to the vendored
+  requests 2.31.0. ``requests.utils.get_netrc_auth()`` took the host name by
+  splitting the URL's netloc at the first ``:``, so a URL with credentials
+  in it could make it look up (and send) ``.netrc`` credentials for a
+  different host. It now uses the parsed host name. pip calls it for index
+  and find-links URLs. (`GHSA-9hjg-9r4m-mvj7 <https://github.com/advisories/GHSA-9hjg-9r4m-mvj7>`_)
+- **CVE-2026-25645**: Backport the requests 2.33.0 fixes to the vendored
+  requests 2.31.0. ``requests.utils.extract_zipped_paths()`` extracted a
+  zip member to a predictable file name in the shared temporary directory
+  and reused an existing file there; it now extracts to a new ``mkstemp``
+  file. ``HTTPAdapter.cert_verify()`` no longer calls it for the default CA
+  bundle (pip's vendored certifi already extracts its bundle to a real
+  file), as in upstream requests. pip did not reach the vulnerable path;
+  the fix is defense in depth. (`GHSA-gc5v-m9x4-r6x2 <https://github.com/advisories/GHSA-gc5v-m9x4-r6x2>`_)
+- **CVE-2024-35195** is not ported. In requests before 2.32.0, a connection
+  pool first used with ``verify=False`` was reused by later requests to the
+  same host with verification on. pip never mixes the two on one adapter:
+  ``--trusted-host`` hosts are mounted on their own ``InsecureHTTPAdapter``
+  and every other request goes through the verifying adapter, so pip does
+  not reach this case. (`GHSA-9wx4-h78v-vm56 <https://github.com/advisories/GHSA-9wx4-h78v-vm56>`_)
+
 24.0.post3 (2026-10-28)
 =======================
 
