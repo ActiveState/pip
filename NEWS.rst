@@ -9,6 +9,21 @@
 
 .. towncrier release notes start
 
+24.0.post5 (2026-11-03)
+=======================
+
+ActiveState security release for the Python 3.7-compatible pip 24.0 line.
+
+Security Fixes
+--------------
+
+- Upgrade vendored idna from 3.4 to 3.7, the same version pip 24.1 vendors.
+  It fixes **CVE-2024-3651**: ``idna.encode()`` took quadratic time on
+  labels containing many ZERO WIDTH NON-JOINER characters, because the
+  CONTEXTJ check scanned the whole label for each joiner instead of
+  stopping at the first non-transparent character. pip runs idna on host
+  names from index URLs, find-links URLs and requirement URLs. (`GHSA-jjg7-2v4v-x38h <https://github.com/advisories/GHSA-jjg7-2v4v-x38h>`_)
+
 24.0.post4 (2026-10-29)
 =======================
 
